@@ -64,16 +64,6 @@ def isRunning():
 		fp.close()
 		return False
 
-def writeAvisynth(options):
-	path = 'z:' + options['path'][0].replace("/","\\")
-	metadata = youtubeUpload.getMetadata(options['path'][0])
-	template = open(scriptDir + "avisynth.avs", 'r').read()
-	template = template.format(intro = "z:\\home\\typothree\\VideoParts\\intro.mp4", video = path, outro = "z:\\home\\typothree\\VideoParts\\outro.mp4", title=metadata['title'], course="01234 Test", date="7. maaned")
-	script = open(options['path'][0].replace(options['path'][3],"avs"), 'w')
-	script.write(template)
-	script.close
-	return template
-
 def versionExists(file, suffix):
 	for filetype in fileTypes:
 		if re.sub(rawSuffix+".+$",suffix, file) + "." + filetype in fileList:
@@ -94,12 +84,16 @@ def getConfig(file):
 		parent = parent[i]['structure']
 	return config
 
-def handBrakeArgs(options):
-	return "-e x264 -q " + str(options['quality']) + " -B " + str(options['audiobitrate']) + " -w " + str(options['width']) + " -l " + str(options['height'])
-
 if isRunning():
 	log("Another instance is already running. Exiting.")
 	sys.exit(0)
+
+def validateList(options, nonOptional):
+	missing = []
+	for opt in nonOptional:
+		if not options.get(opt):
+			missing.append(opt)
+	return missing
 
 ##########################################
 ########### VIDEOCONVERT #################
@@ -110,41 +104,76 @@ class videoConvert(threading.Thread):
 	def run(self):
 		while not mainThreadDone or self.queue.__len__() > 0:
 			if self.queue.__len__() > 0:
+				log("Currently "+str(self.queue.__len__()) + " items queued for conversion.")
 				element = self.queue.popleft()
 				self.handleConversionJob(element)
 			time.sleep(0.5)
 		print "Main thread exited, terminating videoConvert..."
 	def executeCommand(self, cmd):
-		cmdparts = cmd.split(" ")
-		cmdparts = cmd
-		process = subprocess.Popen(cmdparts, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+		process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 		stdout, stderr = process.communicate()
 		if process.returncode > 0:
-			raise Exception({"returncode": process.returncode})
+			raise Exception({"returncode": process.returncode, "cmd": cmd, "type": "failedCommand"})
 		return stdout
 
 	# Routine to get basic information about a video file
 	def videoInfo(self):
 		pass
+	
+	def writeAvisynth(self,options):
+		path = 'z:' + options['path'][0].replace("/","\\")
+		metadata = youtubeUpload.getMetadata(options['path'][0])
+
+		title = metadata.get('title')
+		course_id = options['config'].get('course_id')
+		pubdate = metadata.get('pubDate')
+
+		if title and course_id and pubdate:
+			template = open(scriptDir + "avisynth.avs", 'r').read()
+			template = template.format(intro = "z:\\home\\typothree\\VideoParts\\intro.mp4", video = path, outro = "z:\\home\\typothree\\VideoParts\\outro.mp4", title=title, course=course_id, date=pubdate)
+			script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.avs', 'w')
+			script.write(template)
+			script.close
+			return template
+		else:
+			raise Exception({"type": "missingMetadata"})
 
 	def handleConversionJob(self,conversionJob):
 		rawFile = conversionJob['path'][0]
 		options = conversionJob['options']
 
+		missingOptions = validateList(options, ["width", "height", "quality", "suffix", "audiobitrate"])
+		if missingOptions.__len__() > 0:
+			log("Missing options: " + ", ".join(missingOptions) + " for file " + rawFile)
+			return False
+
 		conversionJob['outputFile'] = scriptDir+"Konverterede/" + conversionJob['path'][1] + "-"+ conversionJob['options']['suffix']
 		outputFile = conversionJob['outputFile']
 		finalDestination = re.sub(rawSuffix, conversionJob['options']['suffix'],conversionJob['path'][0])
+		if os.path.isfile(finalDestination):
+			log("File " + finalDestination + " already exists!")
+			return False
+
+		convertLog = ""
 
 		if os.path.isfile(outputFile):
 			log("Removed outputFile prior to encoding ...")
 			os.remove(outputFile)
 
-		if not options.get('branding') == True:
-			log("HandBrake conversion of " + rawFile + "...")
-			convertLog = self.handbrakeConversion(conversionJob)
-		else:
-			log("Avisynth conversion of " + rawFile + "...")
-			convertLog = self.avisynthConversion(conversionJob)
+		try:
+			if not conversionJob['config'].get('branding') == True:
+				log("HandBrake conversion of " + rawFile + "...")
+				convertLog = self.handbrakeConversion(conversionJob)
+			else:
+				log("Avisynth conversion of " + rawFile + "...")
+				convertLog = self.avisynthConversion(conversionJob)
+		except Exception as e:
+			if e[0]['type'] == "missingMetadata":
+				log("Missing metadata for file " + rawFile)
+				return
+			elif e[0]['type'] == "failedCommand":
+				print "error"
+				print e
 		
 		fp = open(outputFile + ".log", "w")
 		fp.write(convertLog)
@@ -159,24 +188,28 @@ class videoConvert(threading.Thread):
 
 	def avisynthConversion(self, job):
 		options = job['options']
-		avsScript = job['path'][0].replace(job['path'][3],"avs")
 		inputFile = job['path'][0]
 		outputFile = job['outputFile'] + '.mp4'
 		audioFile = job['outputFile'] + '.wav'
 		videoFile = job['outputFile'] + '.264'
+		avsScript = job['outputFile'] + '.avs'
 
-		writeAvisynth(job)
+		self.writeAvisynth(job)
 		log = ""
-		log += self.executeCommand("wine avs2pipe audio " + avsScript + " > " + audioFile)
-		log += self.executeCommand("wine avs2yuv "+ avsScript +" - | x264 --fps 25 --stdin y4m --output "+videoFile+" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
-		log += self.executeCommand("yes | ffmpeg -r 25 -i "+videoFile+" -i "+audioFile+" -vcodec copy -strict -2 "+outputFile)
-
-		os.remove(audioFile)
-		os.remove(videoFile)
-
+		try:
+			log += self.executeCommand("wine avs2pipe audio " + avsScript + " > " + audioFile)
+			log += self.executeCommand("wine avs2yuv "+ avsScript +" - | x264 --fps 25 --stdin y4m --output "+videoFile+" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
+			log += self.executeCommand("yes | ffmpeg -r 25 -i "+videoFile+" -i "+audioFile+" -vcodec copy -strict -2 "+outputFile)
+		except Exception:
+			raise
+		finally:
+			os.remove(audioFile)
+			os.remove(videoFile)
 		return log
-	def handbrakeConversion(self, job):	
-		cmd = "nice -n " + str(NICENESS) + " " + HandBrakeCLI + " --cpu " + str(CPUS) + " " + handBrakeArgs(options) + " -r 25 -i '" + job['path'][0] + "' -o '" + job['outputFile'] + "'"
+	def handbrakeConversion(self, job):
+		options = job['options']
+		handBrakeArgs = "-e x264 -q " + str(options['quality']) + " -B " + str(options['audiobitrate']) + " -w " + str(options['width']) + " -l " + str(options['height'])	
+		cmd = "nice -n " + str(NICENESS) + " " + HandBrakeCLI + " --cpu " + str(CPUS) + " " + handBrakeArgs + " -r 25 -i '" + job['path'][0] + "' -o '" + job['outputFile'] + ".mp4'"
 		return self.executeCommand(cmd)
 
 
@@ -190,33 +223,42 @@ class youtubeUpload (threading.Thread):
 		while not mainThreadDone or self.queue.__len__() > 0:
 			if self.queue.__len__() > 0:
 				element = self.queue.popleft()
-				metadata = self.getMetadata(element['file'])
+				metadata = self.getMetadata(element['filename'])
 				if metadata.get("enotelms:YouTubeUID"):
-					print "Video is already on YouTube"
+					log("Video is already on YouTube: " + element['filename'])
 					continue
 				else:
-					self.yt_service = self.authenticate(element['username'],element['password'],element['developer_key'])
-					video_id = self.uploadFromMetaData(element['file'], metadata)
-					self.writeMetadata(element['file'],{"enotelms:YouTubeUID": video_id})
+					self.yt_service = self.authenticate(element['username'],element['password'],element['developerKey'])
+					video_id = self.uploadFromMetaData(element, metadata)
+					self.writeMetadata(element['filename'],{"enotelms:YouTubeUID": video_id})
 			time.sleep(0.5)
-		print "Main thread exited, terminating youtubeUpload..."
-		#self.uploadFromMetaData(self.path)
-	def uploadFromMetaData(self, path, metadata):
-		print 'Uploading "' + path + "'"
+		log("Main thread exited, terminating youtubeUpload...")
+
+	def uploadFromMetaData(self, preferences, metadata):
+		log('Uploading "' + preferences['filename'] + "'")
+		if preferences.get('private') == True:
+			private = True
+		else:
+			private = False
 		options = {
 			"title": metadata['title'],
 			"description": metadata['description'],
 			"keywords": metadata['keywords'],
-			"private": True,
-			"path": path
+			"private": private,
+			"path": preferences['filename']
 		}
 		try:
 			video_id = self.uploadVideo(options)
 		except gdata.youtube.service.YouTubeError:
 			pass
 		else:
-			self.addToPlaylist(video_id, "Testvideoer!!!!!")
+			if playlist:
+				self.addToPlaylist(video_id, playlist)
 			return video_id
+	@staticmethod
+	def addToQueue(filename, options):
+		options['filename'] = filename
+		youtubeUpload.queue.append(options)
 	def authenticate(self, username, password, developer_key):
 		yt_service = gdata.youtube.service.YouTubeService()
 		yt_service.ssl = True
@@ -258,22 +300,28 @@ class youtubeUpload (threading.Thread):
 	def addPlaylist(self, playlist):
 		new_playlist = self.yt_service.AddPlaylist(playlist,'')
 		if isinstance(new_playlist, gdata.youtube.YouTubePlaylistEntry):
-			print 'Added playlist "' + playlist + '"'
+			log('Added playlist "' + playlist + '"')
+			return new_playlist
 	def addToPlaylist(self, video_id, playlist):
 		playlists = self.retrievePlaylists()
 		if playlist in playlists:
-			pass
+			url = playlists[playlist]
 		else:
-			self.addPlaylist(playlist)
-			playlists = self.retrievePlaylists()
+			new_playlist = self.addPlaylist(playlist)
+			url = new_playlist.feed_link[0].href
 
-		entry = self.yt_service.AddPlaylistVideoEntryToPlaylist(playlists[playlist], video_id)
+		entry = self.yt_service.AddPlaylistVideoEntryToPlaylist(url, video_id)
 		if isinstance(entry, gdata.youtube.YouTubePlaylistVideoEntry):
-			print "Video added to playlist '" + playlist + "'"
+			log("Video added to playlist '" + playlist + "'")
 		else:
-			print "Video NOT added to playlist"
+			log("Video NOT added to playlist")
 		pass
 	def uploadVideo(self, options):
+		if options['private'] == True:
+			private = gdata.media.Private()
+		else:
+			private = None
+
 		media_group = gdata.media.Group(
 			title = gdata.media.Title(text=options['title']),
 			description = gdata.media.Description(description_type='plain', text=options['description']),
@@ -284,14 +332,14 @@ class youtubeUpload (threading.Thread):
 				label='Education'
 				)],
 			player = None,
-			private = gdata.media.Private()
+			private = private
 			)
 		video_entry = gdata.youtube.YouTubeVideoEntry(media=media_group)
 		video_file_location = options['path']
 		try:
 			new_entry = self.yt_service.InsertVideoEntry(video_entry, video_file_location)
 		except gdata.youtube.service.YouTubeError as e:
-			print e.message
+			log(e.message)
 			raise
 		else:
 			return new_entry.id.text.split('/')[-1]
@@ -306,7 +354,7 @@ class youtubeUpload (threading.Thread):
 log("Convert script launched")
 log("Launching youtube processing thread..")
 
-#youtubeUpload().start()
+youtubeUpload().start()
 log("Launching video processing thread..")
 videoConvert().start()
 
@@ -354,50 +402,22 @@ for file in fileList:
 							username = youtube.get('username')
 							password = youtube.get('password')
 							developer_key = youtube.get('developerKey')
+							playlist = youtube.get('playlist')
 							if username and password and developer_key:
-								youtubeUpload.queue.append({"username": username, "password": password, "developer_key": developer_key, "file": file.replace(rawSuffix, version)})
+								filename = file.replace(rawSuffix, version)
+								youtubeUpload.addToQueue(filename, youtube.copy())
 					if config.get("convert") == True:
 						for format in config.get('formats'):
 							preset = config.get('presets').get(format)
 							if preset:
 								if not versionExists(file, preset.get('suffix')):
-									conversionJob = {"path": data, "options": preset,"preset": format}
+									conversionJob = {"path": data, "options": preset,"preset": format, "config": config}
 									#conversionList.append(conversionJob)
 									videoConvert.queue.append(conversionJob)
 							else:
 								log("Format '" + format + "' not found. Available ones are (" + ', '.join(format for format in config.get('presets')) + ")")
 
-#pp = pprint.PrettyPrinter(indent=2)
-#pp.pprint(structure)
-
 if conversionList.__len__() > 0:
 	logging = True
-
-log(str(conversionList.__len__()) + " items queued for conversion.")
-for job in conversionList:
-	writeAvisynth(job)
-	finalDestination = re.sub(rawSuffix, job['options']['suffix'],job['path'][0])
-	outputFile = scriptDir+"Konverterede/" + job['path'][1] + "-"+ job['options']['suffix']
-	if os.path.isfile(outputFile):
-		log("Removed outputFile prior to encoding ...")
-		os.remove(outputFile)
-	log("Converting '" + job['path'][0] + "' to '" + job['preset'] + "'")
-	#cmd = "nice -n " + str(NICENESS) + " " + HandBrakeCLI + " --cpu " + str(CPUS) + " " + handBrakeArgs(job['options']) + " -r 25 -i '" + job['path'][0] + "' -o '" + outputFile + "'"
-	cmd = "nice -n " + str(NICENESS) + " " + avisynthLauncher + " " + job['path'][0].replace(job['path'][3],"avs") + " " + job['options']['quality'] + " " + outputFile + " " + str(job['options']['width']) + " " + str(job['options']['height'])
-	log(cmd)
-	process = subprocess.Popen(cmd, shell=True)
-	process.wait()
-	print
-	#fp = open(scriptDir + "Konverterede/" + job['path'][1] + "-"+ job['options']['suffix'] + ".log", "w")
-	#fp.write("".join(process.stderr.readlines()))
-	#fp.close()
-	outputFile = outputFile + ".mp4"
-	if os.path.isfile(outputFile):
-		log("Encoding of " + outputFile + " succeded!")
-		shutil.move(outputFile, finalDestination)
-	else:
-		log("Encoding of " + outputFile + " failed!")
-
-log("Conversion done. exiting!")	
 
 mainThreadDone = True	
