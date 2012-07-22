@@ -8,10 +8,13 @@ import gdata.youtube
 import gdata.youtube.service
 from collections import deque
 
+##########################################
+########### CONSTANTS ####################
+##########################################
+
 podcastPath = "/home/typothree/podcasts/TEST"
 scriptDir = "/home/typothree/VideoParts/"
 HandBrakeCLI = "/home/typothree/prefix/bin/HandBrakeCLI"
-avisynthLauncher = "/home/typothree/VideoParts/convert/convert"
 
 defaultYoutubeCategory = "Education"
 defaultYoutubeKeywords = "Education"
@@ -24,9 +27,6 @@ NICENESS = 15
 # List of file types. For now ignoring .mov, as they in our current setup is unable to convert
 fileTypes = ["mp4", "m4v", "mov"]
 
-# Truncate the logfile to 1000 lines
-#os.system("tail -n 1000 "+scriptDir+"convert.log > "+scriptDir+"convert.log.tmp; mv "+scriptDir+"convert.log.tmp "+scriptDir+"convert.log")
-
 logFile = open(scriptDir + "convert.log", 'a')
 
 fileList = []
@@ -34,21 +34,23 @@ structure = {}
 conversionList = []
 
 # Don't change
-logging = False
+logging = True
 pendingLog = []
 mainThreadDone = False
+
+##########################################
+########### STANDALONE METHODS ###########
+##########################################
 
 def log(string):
 	now = datetime.datetime.now()
 	logstr = "[" + str(now)[:19] + "] " + str(string)
 	if logging:
 		pendingLog.append(logstr)
-		# while len(pendingLog) > 0:
-		# 	#logFile.write(pendingLog.pop(0) + "\n")
-		# 	#logFile.flush()
 	else:
 		pendingLog.append(logstr)
 	print logstr
+
 def isRunning():
 	pidfile="/tmp/convert.pid"
 	try:
@@ -87,16 +89,22 @@ def getConfig(file):
 		parent = parent[i]['structure']
 	return config
 
-if isRunning():
-	log("Another instance is already running. Exiting.")
-	sys.exit(0)
-
 def validateList(options, nonOptional):
 	missing = []
 	for opt in nonOptional:
 		if not options.get(opt):
 			missing.append(opt)
 	return missing
+
+##########################################
+########### CUSTOM EXCEPTIONS ############
+##########################################
+
+class metadataException(Exception):
+	pass
+
+class executeException(Exception):
+	pass
 
 ##########################################
 ########### VIDEOCONVERT #################
@@ -123,7 +131,7 @@ class videoConvert(threading.Thread):
 		process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 		stdout, stderr = process.communicate()
 		if process.returncode > 0:
-			raise Exception({"returncode": process.returncode, "cmd": cmd, "type": "failedCommand"})
+			raise executeException({"returncode": process.returncode, "cmd": cmd})
 		return stdout
 
 	# Routine to get basic information about a video file
@@ -142,11 +150,11 @@ class videoConvert(threading.Thread):
 			template = open(scriptDir + "avisynth.avs", 'r').read()
 			template = template.format(intro = "z:\\home\\typothree\\VideoParts\\intro.mp4", video = path, outro = "z:\\home\\typothree\\VideoParts\\outro.mp4", title=title, course=course_id, date=pubdate)
 			script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.avs', 'w')
-			script.write(template)
+			script.write(template.decode('utf-8').encode('latin-1'))
 			script.close
 			return template
 		else:
-			raise Exception({"type": "missingMetadata"})
+			raise metadataException({"type": "missingMetadata"})
 
 	def handleConversionJob(self,conversionJob):
 		rawFile = conversionJob['path'][0]
@@ -177,13 +185,14 @@ class videoConvert(threading.Thread):
 			else:
 				log("Avisynth conversion of " + rawFile + " to " + conversionJob['preset'])
 				convertLog = self.avisynthConversion(conversionJob)
+		except metadataException as e:
+			log("Missing metadata for file " + rawFile)
+			return
+		except executeException as e:
+			print "error"
+			print e
 		except Exception as e:
-			if e[0]['type'] == "missingMetadata":
-				log("Missing metadata for file " + rawFile)
-				return
-			elif e[0]['type'] == "failedCommand":
-				print "error"
-				print e
+			print e
 		
 		fp = open(outputFile + ".log", "w")
 		fp.write(convertLog)
@@ -250,6 +259,7 @@ class youtubeUpload (threading.Thread):
 
 	def uploadFromMetaData(self, preferences, metadata):
 		log('Uploading "' + preferences['filename'] + "'")
+		playlist = preferences.get('playlist')
 		if preferences.get('private') == True:
 			private = True
 		else:
@@ -312,7 +322,7 @@ class youtubeUpload (threading.Thread):
 		if os.path.isfile(metafile):
 			f = open(metafile, 'a')
 			for idx in data:
-				f.write(idx+" = "+data[idx]+"\n")
+				f.write("\n" + idx+" = "+data[idx]+"\n")
 			f.close()
 	def retrievePlaylists(self):
 		playlist_feed = self.yt_service.GetYouTubePlaylistFeed(username='default')
@@ -370,13 +380,14 @@ class youtubeUpload (threading.Thread):
 		else:
 			return new_entry.id.text.split('/')[-1]
 
-# END youtubeUpload
-
-
 ##########################################
 ########### Main thread ##################
 ##########################################
 
+if isRunning():
+	log("Another instance is already running. Exiting.")
+	sys.exit(0)
+	
 log("Convert script launched")
 log("Launching youtube processing thread..")
 
@@ -438,12 +449,8 @@ for file in fileList:
 							if preset:
 								if not versionExists(file, preset.get('suffix')):
 									conversionJob = {"path": data, "options": preset,"preset": format, "config": config}
-									#conversionList.append(conversionJob)
 									videoConvert.queue.append(conversionJob)
 							else:
 								log("Format '" + format + "' not found. Available ones are (" + ', '.join(format for format in config.get('presets')) + ")")
-
-if conversionList.__len__() > 0:
-	logging = True
 
 #mainThreadDone = True	
