@@ -13,6 +13,9 @@ scriptDir = "/home/typothree/VideoParts/"
 HandBrakeCLI = "/home/typothree/prefix/bin/HandBrakeCLI"
 avisynthLauncher = "/home/typothree/VideoParts/convert/convert"
 
+defaultYoutubeCategory = "Education"
+defaultYoutubeKeywords = "Education"
+
 rawSuffix = "raw" # Used to be 720p
 
 CPUS = 4
@@ -106,7 +109,14 @@ class videoConvert(threading.Thread):
 			if self.queue.__len__() > 0:
 				log("Currently "+str(self.queue.__len__()) + " items queued for conversion.")
 				element = self.queue.popleft()
-				self.handleConversionJob(element)
+				if self.handleConversionJob(element):
+
+					# Adding job to youtubeUpload's queue. Should probably be handled by a watcher thread instead
+					youtubeConfig = element['config'].get("youtube")
+					destination = re.sub(rawSuffix, element['options']['suffix'],element['path'][0])
+					if youtubeConfig:
+						if element.get("preset") == youtubeConfig.get("uploadVersion"):
+							youtubeUpload.addToQueue(destination, youtubeConfig)
 			time.sleep(0.5)
 		print "Main thread exited, terminating videoConvert..."
 	def executeCommand(self, cmd):
@@ -165,7 +175,7 @@ class videoConvert(threading.Thread):
 				log("HandBrake conversion of " + rawFile + "...")
 				convertLog = self.handbrakeConversion(conversionJob)
 			else:
-				log("Avisynth conversion of " + rawFile + "...")
+				log("Avisynth conversion of " + rawFile + " to " + conversionJob['preset'])
 				convertLog = self.avisynthConversion(conversionJob)
 		except Exception as e:
 			if e[0]['type'] == "missingMetadata":
@@ -183,6 +193,7 @@ class videoConvert(threading.Thread):
 		if os.path.isfile(outputFile):
 			log("Encoding of " + outputFile + " succeded!")
 			shutil.move(outputFile, finalDestination)
+			return True
 		else:
 			log("Encoding of " + outputFile + " failed!")
 
@@ -230,7 +241,10 @@ class youtubeUpload (threading.Thread):
 				else:
 					self.yt_service = self.authenticate(element['username'],element['password'],element['developerKey'])
 					video_id = self.uploadFromMetaData(element, metadata)
-					self.writeMetadata(element['filename'],{"enotelms:YouTubeUID": video_id})
+					if video_id != False:
+						self.writeMetadata(element['filename'],{"enotelms:YouTubeUID": video_id})
+					else:
+						log("Youtube upload failed!")
 			time.sleep(0.5)
 		log("Main thread exited, terminating youtubeUpload...")
 
@@ -240,17 +254,26 @@ class youtubeUpload (threading.Thread):
 			private = True
 		else:
 			private = False
+		missing = validateList(metadata, ["title", "description"])
+		if missing.__len__() > 0:
+			log("Missing options: " + ", ".join(missing) + " for file " + preferences['filename'])
+			return False
+		if not metadata.get('keywords'):
+			metadata['keywords'] = defaultYoutubeKeywords
+			log("WARNING: No keywords specified for file: " + preferences['filename'] + "!")
+
 		options = {
 			"title": metadata['title'],
 			"description": metadata['description'],
 			"keywords": metadata['keywords'],
 			"private": private,
-			"path": preferences['filename']
+			"path": preferences['filename'],
+			"category": preferences.get('category')
 		}
 		try:
 			video_id = self.uploadVideo(options)
 		except gdata.youtube.service.YouTubeError:
-			pass
+			return False
 		else:
 			if playlist:
 				self.addToPlaylist(video_id, playlist)
@@ -321,15 +344,18 @@ class youtubeUpload (threading.Thread):
 			private = gdata.media.Private()
 		else:
 			private = None
-
+		if options.get('category'):
+			category = options.get('category')
+		else:
+			category = defaultYoutubeCategory
 		media_group = gdata.media.Group(
 			title = gdata.media.Title(text=options['title']),
 			description = gdata.media.Description(description_type='plain', text=options['description']),
 			keywords = gdata.media.Keywords(text=options['keywords']),
 			category = [gdata.media.Category(
-				text='Education',
+				text=category,
 				scheme='http://gdata.youtube.com/schemas/2007/categories.cat',
-				label='Education'
+				label=category
 				)],
 			player = None,
 			private = private
@@ -397,7 +423,7 @@ for file in fileList:
 							version = youtube.get('uploadVersion')
 						else:
 							version = "720p"
-
+						config['youtube']['uploadVersion'] = version
 						if versionExists(file, version):
 							username = youtube.get('username')
 							password = youtube.get('password')
@@ -420,4 +446,4 @@ for file in fileList:
 if conversionList.__len__() > 0:
 	logging = True
 
-mainThreadDone = True	
+#mainThreadDone = True	
