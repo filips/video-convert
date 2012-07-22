@@ -139,7 +139,7 @@ class videoConvert(threading.Thread):
 			log("Removed outputFile prior to encoding ...")
 			os.remove(outputFile)
 
-		if options.get('branding') == True:
+		if not options.get('branding') == True:
 			log("HandBrake conversion of " + rawFile + "...")
 			convertLog = self.handbrakeConversion(conversionJob)
 		else:
