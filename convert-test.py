@@ -24,7 +24,7 @@ rawSuffix = "raw" # Used to be 720p
 CPUS = 4
 NICENESS = 15
 
-# List of file types. For now ignoring .mov, as they in our current setup is unable to convert
+# List of file types.
 fileTypes = ["mp4", "m4v", "mov"]
 
 logFile = open(scriptDir + "convert.log", 'a')
@@ -173,7 +173,7 @@ class videoConvert(threading.Thread):
 			return False
 
 		convertLog = ""
-
+		outputFile = outputFile + ".mp4"
 		if os.path.isfile(outputFile):
 			log("Removed outputFile prior to encoding ...")
 			os.remove(outputFile)
@@ -191,20 +191,24 @@ class videoConvert(threading.Thread):
 		except executeException as e:
 			print "error"
 			print e
+			log("Encoding of " + outputFile + " failed!")
 		except Exception as e:
 			print e
-		
-		fp = open(outputFile + ".log", "w")
+		else:
+			if os.path.isfile(outputFile):
+				log("Encoding of " + outputFile + " succeded!")
+				shutil.move(outputFile, finalDestination)
+				return True
+			else:
+				log("Encoding of " + outputFile + " failed!")
+
+
+		fp = open(outputFile.replace(".mp4",".log"), "w")
 		fp.write(convertLog)
 		fp.close()
 
-		outputFile = outputFile + ".mp4"
-		if os.path.isfile(outputFile):
-			log("Encoding of " + outputFile + " succeded!")
-			shutil.move(outputFile, finalDestination)
-			return True
-		else:
-			log("Encoding of " + outputFile + " failed!")
+		
+
 
 	def avisynthConversion(self, job):
 		options = job['options']
@@ -387,7 +391,7 @@ class youtubeUpload (threading.Thread):
 if isRunning():
 	log("Another instance is already running. Exiting.")
 	sys.exit(0)
-	
+
 log("Convert script launched")
 log("Launching youtube processing thread..")
 
