@@ -7,6 +7,7 @@ import threading
 import gdata.youtube
 import gdata.youtube.service
 from collections import deque
+import smtplib
 
 ##########################################
 ########### CONSTANTS ####################
@@ -47,6 +48,9 @@ def log(string):
 	logstr = "[" + str(now)[:19] + "] " + str(string)
 	if logging:
 		pendingLog.append(logstr)
+		while len(pendingLog) > 0:
+			logFile.write(pendingLog.pop(0) + "\n")
+			logFile.flush()
 	else:
 		pendingLog.append(logstr)
 	print logstr
@@ -96,6 +100,22 @@ def validateList(options, nonOptional):
 			missing.append(opt)
 	return missing
 
+def sendErrorReport(filename, email):
+	SERVER = "localhost"
+	FROM = "noreply@podcast.llab.dtu.dk"
+	TO = [email]
+
+	SUBJECT = "Encoding failed!"
+
+	TEXT = "Encoding failed for file: " + filename
+
+	message = "From: %s\r\nTo: %s\r\nSubject: %s\r\n\r\n%s" % (FROM, ", ".join(TO), SUBJECT, TEXT)
+
+	server = smtplib.SMTP(SERVER)
+	server.sendmail(FROM, TO, message)
+	server.quit()
+	time.sleep(5)
+
 ##########################################
 ########### CUSTOM EXCEPTIONS ############
 ##########################################
@@ -117,17 +137,27 @@ class videoConvert(threading.Thread):
 			if self.queue.__len__() > 0:
 				log("Currently "+str(self.queue.__len__()) + " items queued for conversion.")
 				element = self.queue.popleft()
-				if self.handleConversionJob(element):
+				numStreams = self.videoInfo(element['path'][0])
+				if numStreams == 1:
+					if self.handleConversionJob(element):
 
-					# Adding job to youtubeUpload's queue. Should probably be handled by a watcher thread instead
-					youtubeConfig = element['config'].get("youtube")
-					destination = re.sub(rawSuffix, element['options']['suffix'],element['path'][0])
-					if youtubeConfig:
-						if element.get("preset") == youtubeConfig.get("uploadVersion"):
-							youtubeUpload.addToQueue(destination, youtubeConfig)
+						# Adding job to youtubeUpload's queue. Should probably be handled by a watcher thread instead
+						youtubeConfig = element['config'].get("youtube")
+						destination = re.sub(rawSuffix, element['options']['suffix'],element['path'][0])
+						if youtubeConfig:
+							if element.get("preset") == youtubeConfig.get("uploadVersion"):
+								youtubeUpload.addToQueue(destination, youtubeConfig)
+					else:
+						if element['config'].get("contactEmail"):
+							sendErrorReport(element['path'][0], element['config'].get('contactEmail'))
+				elif numStreams == False:
+					log("Couldn't get video information for " + element['path'][0]) + " , skipping!"
+				else:
+					log("Video contains " + str(numStreams) + " videostrems, and was skipped! ("+element['path'][0]+")")
 			time.sleep(0.5)
 		print "Main thread exited, terminating videoConvert..."
-	def executeCommand(self, cmd):
+	@staticmethod
+	def executeCommand(cmd):
 		process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 		stdout, stderr = process.communicate()
 		if process.returncode > 0:
@@ -135,9 +165,15 @@ class videoConvert(threading.Thread):
 		return stdout
 
 	# Routine to get basic information about a video file
-	def videoInfo(self):
-		pass
-	
+	def videoInfo(self, file):
+		try:
+			numStreams = int(self.executeCommand("ffprobe "+file+" 2>&1 | awk '/Stream .+ Video/{print $0}' | wc -l"))
+		except executeException:
+			return False
+		except ValueError:
+			return False
+		else:
+			return numStreams
 	def writeAvisynth(self,options):
 		path = 'z:' + options['path'][0].replace("/","\\")
 		metadata = youtubeUpload.getMetadata(options['path'][0])
@@ -167,11 +203,11 @@ class videoConvert(threading.Thread):
 
 		conversionJob['outputFile'] = scriptDir+"Konverterede/" + conversionJob['path'][1] + "-"+ conversionJob['options']['suffix']
 		outputFile = conversionJob['outputFile']
-		finalDestination = re.sub(rawSuffix, conversionJob['options']['suffix'],conversionJob['path'][0])
+		finalDestination = re.sub(rawSuffix+"\..+", conversionJob['options']['suffix'] + ".mp4",conversionJob['path'][0])
 		if os.path.isfile(finalDestination):
 			log("File " + finalDestination + " already exists!")
 			return False
-
+		success = False
 		convertLog = ""
 		outputFile = outputFile + ".mp4"
 		if os.path.isfile(outputFile):
@@ -187,7 +223,7 @@ class videoConvert(threading.Thread):
 				convertLog = self.avisynthConversion(conversionJob)
 		except metadataException as e:
 			log("Missing metadata for file " + rawFile)
-			return
+			return False
 		except executeException as e:
 			print "error"
 			print e
@@ -198,14 +234,19 @@ class videoConvert(threading.Thread):
 			if os.path.isfile(outputFile):
 				log("Encoding of " + outputFile + " succeded!")
 				shutil.move(outputFile, finalDestination)
-				return True
+				success = True
 			else:
 				log("Encoding of " + outputFile + " failed!")
 
+		if convertLog:
+			fp = open(outputFile.replace(".mp4",".log"), "w")
+			fp.write(convertLog)
+			fp.close()
 
-		fp = open(outputFile.replace(".mp4",".log"), "w")
-		fp.write(convertLog)
-		fp.close()
+		if success == True:
+			return True
+		else:
+			return False
 
 		
 
@@ -227,8 +268,10 @@ class videoConvert(threading.Thread):
 		except Exception:
 			raise
 		finally:
-			os.remove(audioFile)
-			os.remove(videoFile)
+			if os.path.isfile(audioFile):
+				os.remove(audioFile)
+			if os.path.isfile(videoFile):
+				os.remove(videoFile)
 		return log
 	def handbrakeConversion(self, job):
 		options = job['options']
@@ -244,7 +287,7 @@ class videoConvert(threading.Thread):
 class youtubeUpload (threading.Thread):
 	queue = deque()
 	def run(self):
-		while not mainThreadDone or self.queue.__len__() > 0:
+		while not (mainThreadDone and not vidConv.isAlive()) or self.queue.__len__() > 0:
 			if self.queue.__len__() > 0:
 				element = self.queue.popleft()
 				metadata = self.getMetadata(element['filename'])
@@ -395,9 +438,12 @@ if isRunning():
 log("Convert script launched")
 log("Launching youtube processing thread..")
 
-youtubeUpload().start()
+youtube = youtubeUpload()
 log("Launching video processing thread..")
-videoConvert().start()
+vidConv = videoConvert()
+
+youtube.start()
+vidConv.start()
 
 log("Scanning " + podcastPath +  " for movie files...")
 for root, subFolders, files in os.walk(podcastPath):
@@ -432,6 +478,8 @@ for file in fileList:
 			else:
 				if quality == rawSuffix:
 					config = getConfig(file)
+
+					# Check if videos are to be uploaded to YouTube
 					if config.get('youtubeUpload') == True:
 						youtube = config.get('youtube');
 						if youtube.get('uploadVersion'):
@@ -447,6 +495,7 @@ for file in fileList:
 							if username and password and developer_key:
 								filename = file.replace(rawSuffix, version)
 								youtubeUpload.addToQueue(filename, youtube.copy())
+					# Check if videos are to be converted
 					if config.get("convert") == True:
 						for format in config.get('formats'):
 							preset = config.get('presets').get(format)
@@ -456,5 +505,15 @@ for file in fileList:
 									videoConvert.queue.append(conversionJob)
 							else:
 								log("Format '" + format + "' not found. Available ones are (" + ', '.join(format for format in config.get('presets')) + ")")
+					
+					# Generate thumbnails if missing
+					thumbnail = re.sub("-" + rawSuffix + "\.(" + "|".join(fileTypes) + ")", "-1.png", file)
+					if not os.path.isfile(thumbnail):
+						try:
+							videoConvert.executeCommand("ffmpeg -ss 0.5 -i '"+file+"' -vframes 1 -s 640x360 '"+thumbnail+"'")
+						except executeException:
+							log("Error generating thumbnail: " + thumbnail)
+						else:
+							log("Generated thumbnail: " + thumbnail)
 
-#mainThreadDone = True	
+mainThreadDone = True	
