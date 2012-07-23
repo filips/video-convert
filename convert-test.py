@@ -138,6 +138,7 @@ class videoConvert(threading.Thread):
 				log("Currently "+str(self.queue.__len__()) + " items queued for conversion.")
 				element = self.queue.popleft()
 				numStreams = self.videoInfo(element['path'][0])
+				error = False
 				if numStreams == 1:
 					if self.handleConversionJob(element):
 
@@ -148,12 +149,15 @@ class videoConvert(threading.Thread):
 							if element.get("preset") == youtubeConfig.get("uploadVersion"):
 								youtubeUpload.addToQueue(destination, youtubeConfig)
 					else:
+						error = True
 						if element['config'].get("contactEmail"):
 							sendErrorReport(element['path'][0], element['config'].get('contactEmail'))
 				elif numStreams == False:
-					log("Couldn't get video information for " + element['path'][0]) + " , skipping!"
+					log("Couldn't get video information for " + element['path'][0] + " , skipping!")
+					error = True
 				else:
 					log("Video contains " + str(numStreams) + " videostrems, and was skipped! ("+element['path'][0]+")")
+					error = True
 			time.sleep(0.5)
 		print "Main thread exited, terminating videoConvert..."
 	@staticmethod
@@ -167,7 +171,7 @@ class videoConvert(threading.Thread):
 	# Routine to get basic information about a video file
 	def videoInfo(self, file):
 		try:
-			numStreams = int(self.executeCommand("ffprobe "+file+" 2>&1 | awk '/Stream .+ Video/{print $0}' | wc -l"))
+			numStreams = int(self.executeCommand("ffprobe \""+file+"\" 2>&1 | awk '/Stream .+ Video/{print $0}' | wc -l"))
 		except executeException:
 			return False
 		except ValueError:
@@ -262,9 +266,9 @@ class videoConvert(threading.Thread):
 		self.writeAvisynth(job)
 		log = ""
 		try:
-			log += self.executeCommand("wine avs2pipe audio " + avsScript + " > " + audioFile)
-			log += self.executeCommand("wine avs2yuv "+ avsScript +" - | x264 --fps 25 --stdin y4m --output "+videoFile+" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
-			log += self.executeCommand("yes | ffmpeg -r 25 -i "+videoFile+" -i "+audioFile+" -vcodec copy -strict -2 "+outputFile)
+			log += self.executeCommand("wine avs2pipe audio \"" + avsScript + "\" > \"" + audioFile + "\"")
+			log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps 25 --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
+			log += self.executeCommand("yes | ffmpeg -r 25 -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\"")
 		except Exception:
 			raise
 		finally:
