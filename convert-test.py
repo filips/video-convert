@@ -17,22 +17,31 @@ podcastPath = "/home/typothree/podcasts/TEST"
 scriptDir = "/home/typothree/VideoParts/"
 HandBrakeCLI = "/home/typothree/prefix/bin/HandBrakeCLI"
 
+# YouTube parameters to be passed if metadata is missing
 defaultYoutubeCategory = "Education"
 defaultYoutubeKeywords = "Education"
+
+# Default intro and outro video in case branding is specified, but no custom files are found
+defaultIntro = "z:\\home\\typothree\\VideoParts\\intro.mp4"
+defaultOutro = "z:\\home\\typothree\\VideoParts\\outro.mp4"
 
 rawSuffix = "raw" # Used to be 720p
 
 CPUS = 4
 NICENESS = 15
 
-# List of file types.
+# List of possible video file types
 fileTypes = ["mp4", "m4v", "mov"]
+
 
 logFile = open(scriptDir + "convert.log", 'a')
 
 fileList = []
 structure = {}
 conversionList = []
+
+# The drive letter in Wine correlating to linux "/"
+wineDrive = "z"
 
 # Don't change
 logging = True
@@ -55,6 +64,7 @@ def log(string):
 		pendingLog.append(logstr)
 	print logstr
 
+# Find out if another instance of the script is running
 def isRunning():
 	pidfile="/tmp/convert.pid"
 	try:
@@ -79,6 +89,7 @@ def versionExists(file, suffix):
 			return True
 	return False
 
+# Get the complete config array for a file located at "file"
 def getConfig(file):
 	parts = file[len(podcastPath):].split('/')[:-1]
 	config = {}
@@ -93,6 +104,7 @@ def getConfig(file):
 		parent = parent[i]['structure']
 	return config
 
+# Get a list of items missing from a list
 def validateList(options, nonOptional):
 	missing = []
 	for opt in nonOptional:
@@ -100,6 +112,7 @@ def validateList(options, nonOptional):
 			missing.append(opt)
 	return missing
 
+# Delivery of error reports to a configured email adress
 def sendErrorReport(filename, email):
 	SERVER = "localhost"
 	FROM = "noreply@podcast.llab.dtu.dk"
@@ -178,17 +191,32 @@ class videoConvert(threading.Thread):
 			return False
 		else:
 			return numStreams
+
+	def winPath(self, unix_path):
+		return wineDrive + ":" + unix_path.replace("/","\\")
+
+	# Write avisynth script
 	def writeAvisynth(self,options):
-		path = 'z:' + options['path'][0].replace("/","\\")
+		path = self.winPath(options['path'][0])
 		metadata = youtubeUpload.getMetadata(options['path'][0])
 
 		title = metadata.get('title')
 		course_id = options['config'].get('course_id')
 		pubdate = metadata.get('pubDate')
+		dirname = os.path.dirname(options['path'][0]) + "/"
+
+		if os.path.isfile(dirname + "intro.mp4"):
+			intro = self.winPath(dirname + "intro.mp4")
+		else:
+			intro = defaultIntro
+		if os.path.isfile(dirname + "outro.mp4"):
+			outro = self.winPath(dirname + "outro.mp4")
+		else:
+			outro = defaultOutro
 
 		if title and course_id and pubdate:
 			template = open(scriptDir + "avisynth.avs", 'r').read()
-			template = template.format(intro = "z:\\home\\typothree\\VideoParts\\intro.mp4", video = path, outro = "z:\\home\\typothree\\VideoParts\\outro.mp4", title=title, course=course_id, date=pubdate)
+			template = template.format(intro = intro, video = path, outro = outro, title=title, course=course_id, date=pubdate)
 			script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.avs', 'w')
 			script.write(template.decode('utf-8').encode('latin-1'))
 			script.close
@@ -252,9 +280,7 @@ class videoConvert(threading.Thread):
 		else:
 			return False
 
-		
-
-
+	# Conversion using avisynth, utilizing branding and intro/outro videos
 	def avisynthConversion(self, job):
 		options = job['options']
 		inputFile = job['path'][0]
@@ -277,6 +303,8 @@ class videoConvert(threading.Thread):
 			if os.path.isfile(videoFile):
 				os.remove(videoFile)
 		return log
+
+	# Legacy conversion using Handbrake. As of now faster and perhaps more reliable than avisynth.
 	def handbrakeConversion(self, job):
 		options = job['options']
 		handBrakeArgs = "-e x264 -q " + str(options['quality']) + " -B " + str(options['audiobitrate']) + " -w " + str(options['width']) + " -l " + str(options['height'])	
@@ -308,6 +336,7 @@ class youtubeUpload (threading.Thread):
 			time.sleep(0.5)
 		log("Main thread exited, terminating youtubeUpload...")
 
+	# Upload video processing metadata
 	def uploadFromMetaData(self, preferences, metadata):
 		log('Uploading "' + preferences['filename'] + "'")
 		playlist = preferences.get('playlist')
@@ -339,10 +368,12 @@ class youtubeUpload (threading.Thread):
 			if playlist:
 				self.addToPlaylist(video_id, playlist)
 			return video_id
+
 	@staticmethod
 	def addToQueue(filename, options):
 		options['filename'] = filename
 		youtubeUpload.queue.append(options)
+
 	def authenticate(self, username, password, developer_key):
 		yt_service = gdata.youtube.service.YouTubeService()
 		yt_service.ssl = True
@@ -353,6 +384,7 @@ class youtubeUpload (threading.Thread):
 		yt_service.ProgrammaticLogin()
 
 		return yt_service
+
 	@staticmethod
 	def getMetadata(file):
 		metafile = re.split('-\w+\.\w+$',file)[0] + ".txt"
@@ -368,6 +400,7 @@ class youtubeUpload (threading.Thread):
 			return metadata
 		else:
 			return False
+			
 	def writeMetadata(self,file,data):
 		metafile = re.split('-\w+\.\w+$',file)[0] + ".txt"
 		if os.path.isfile(metafile):
