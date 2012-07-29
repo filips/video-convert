@@ -216,7 +216,13 @@ class videoConvert(threading.Thread):
 
 		if title and course_id and pubdate:
 			template = open(scriptDir + "avisynth.avs", 'r').read()
-			template = template.format(intro = intro, video = path, outro = outro, title=title, course=course_id, date=pubdate)
+			videoList = ""
+			for i in range(len(options['files'])):
+				videoList += "addVideoClip(\"" + self.winPath(options['files'][i]) + "\",0,0)"
+				if i != len(options['files'])-1:
+					videoList += ","
+			template = template.format(intro = intro, video = path, outro = outro, title=title, course=course_id, date=pubdate, introOutro="True", brandClips="True", videoList=videoList)
+
 			script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.avs', 'w')
 			script.write(template.decode('utf-8').encode('latin-1'))
 			script.close
@@ -225,12 +231,12 @@ class videoConvert(threading.Thread):
 			raise metadataException({"type": "missingMetadata"})
 
 	def handleConversionJob(self,conversionJob):
-		rawFile = conversionJob['path'][0]
+		rawFiles = conversionJob['files']
 		options = conversionJob['options']
 
 		missingOptions = validateList(options, ["width", "height", "quality", "suffix", "audiobitrate"])
 		if missingOptions.__len__() > 0:
-			log("Missing options: " + ", ".join(missingOptions) + " for file " + rawFile)
+			log("Missing options: " + ", ".join(missingOptions) + " for file " + rawFiles[0])
 			return False
 
 		conversionJob['outputFile'] = scriptDir+"Konverterede/" + conversionJob['path'][1] + "-"+ conversionJob['options']['suffix']
@@ -247,14 +253,15 @@ class videoConvert(threading.Thread):
 			os.remove(outputFile)
 
 		try:
-			if not conversionJob['config'].get('branding') == True:
-				log("HandBrake conversion of " + rawFile + "...")
+			if not conversionJob['config'].get('branding') == True and len(rawFiles) == 1:
+				log("HandBrake conversion of " + rawFiles[0] + "...")
 				convertLog = self.handbrakeConversion(conversionJob)
 			else:
-				log("Avisynth conversion of " + rawFile + " to " + conversionJob['preset'])
+				# BUG: Fallthrough if branding is disabled and more than one raw file is found!
+				log("Avisynth conversion of " + rawFiles[0] + " to " + conversionJob['preset'])
 				convertLog = self.avisynthConversion(conversionJob)
 		except metadataException as e:
-			log("Missing metadata for file " + rawFile)
+			log("Missing metadata for file " + rawFiles[0])
 			return False
 		except executeException as e:
 			print "error"
@@ -503,8 +510,22 @@ for root, subFolders, files in os.walk(podcastPath):
 				last['config'] = config
 		fileList.append(os.path.join(root,file))
 
+rawFiles = {}
+pattern = re.compile("^.+\/([^\/]+)-"+rawSuffix+"(\d)?\.([^\.^-]+)$")
+for path in fileList:
+	parts = pattern.search(path)
+	if parts:
+		if not parts.group(1) in rawFiles:
+			rawFiles[parts.group(1)] = {}
+
+		index = parts.group(2)
+		if not index:
+			index = 0
+
+		rawFiles[parts.group(1)][int(index)] = parts.group(0)
+
+pattern = re.compile("^.+\/([^\/]+)-([a-zA-Z0-9]+)\.([^\.^-]+)$")
 for file in fileList:
-	pattern = re.compile("^.+\/([^\/]+)-([a-zA-Z0-9]+)\.([^\.^-]+)$")
 	parts = pattern.search(file)
 	if parts:
 		data = parts.group(0,1,2,3)
@@ -537,8 +558,9 @@ for file in fileList:
 						for format in config.get('formats'):
 							preset = config.get('presets').get(format)
 							if preset:
+
 								if not versionExists(file, preset.get('suffix')):
-									conversionJob = {"path": data, "options": preset,"preset": format, "config": config}
+									conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config}
 									videoConvert.queue.append(conversionJob)
 							else:
 								log("Format '" + format + "' not found. Available ones are (" + ', '.join(format for format in config.get('presets')) + ")")
