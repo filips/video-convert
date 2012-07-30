@@ -164,7 +164,7 @@ class videoConvert(threading.Thread):
 						# Adding job to youtubeUpload's queue. Should probably be handled by a watcher thread instead
 						youtubeConfig = element['config'].get("youtube")
 						destination = re.sub(rawSuffix, element['options']['suffix'],element['path'][0])
-						if youtubeConfig:
+						if youtubeConfig and element['config'].get('youtubeUpload') == True:
 							if element.get("preset") == youtubeConfig.get("uploadVersion"):
 								youtubeUpload.addToQueue(destination, youtubeConfig)
 					else:
@@ -374,12 +374,16 @@ class youtubeUpload (threading.Thread):
 					log("Video is already on YouTube: " + element['filename'], 'yellow')
 					continue
 				else:
-					self.yt_service = self.authenticate(element['username'],element['password'],element['developerKey'])
-					video_id = self.uploadFromMetaData(element, metadata)
-					if video_id != False:
-						self.writeMetadata(element['filename'],{"enotelms:YouTubeUID": video_id})
+					try:
+						self.yt_service = self.authenticate(element['username'],element['password'],element['developerKey'])
+					except gdata.service.Error as e:
+						log("ERROR: (Possibly?) no video channel created on YouTube account: " + element['username'], "red")
 					else:
-						log("Youtube upload failed!", 'red')
+						video_id = self.uploadFromMetaData(element, metadata)
+						if video_id != False:
+							self.writeMetadata(element['filename'],{"enotelms:YouTubeUID": video_id})
+						else:
+							log("Youtube upload failed!", 'red')
 			time.sleep(0.5)
 		log("Main thread exited, terminating youtubeUpload...")
 
@@ -395,14 +399,14 @@ class youtubeUpload (threading.Thread):
 		if missing.__len__() > 0:
 			log("Missing options: " + ", ".join(missing) + " for file " + preferences['filename'], 'red')
 			return False
-		if not metadata.get('keywords'):
-			metadata['keywords'] = defaultYoutubeKeywords
+		if not metadata.get('itunes:keywords'):
+			metadata['itunes:keywords'] = defaultYoutubeKeywords
 			log("WARNING: No keywords specified for file: " + preferences['filename'] + "!", 'yellow')
 
 		options = {
 			"title": metadata['title'],
 			"description": metadata['description'],
-			"keywords": metadata['keywords'],
+			"keywords": metadata['itunes:keywords'],
 			"private": private,
 			"path": preferences['filename'],
 			"category": preferences.get('category')
