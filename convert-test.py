@@ -91,7 +91,10 @@ def isRunning():
 
 def versionExists(file, suffix):
 	for filetype in fileTypes:
-		if re.sub(rawSuffix+".+$",suffix, file) + "." + filetype in fileList:
+		filename = re.sub(rawSuffix+".+$",suffix, file) + "." + filetype
+		if filename in fileList:
+			return True
+		elif os.path.isfile(filename) and os.stat(filename).st_ctime >= 10:
 			return True
 	return False
 
@@ -206,7 +209,8 @@ class videoConvert(threading.Thread):
 	def writeAvisynth(self,options):
 		path = self.winPath(options['path'][0])
 		metadata = youtubeUpload.getMetadata(options['path'][0])
-
+		if metadata == False:
+			raise metadataException
 		title = metadata.get('title')
 		course_id = options['config'].get('course_id')
 		pubdate = metadata.get('pubDate')
@@ -557,7 +561,10 @@ for root, subFolders, files in os.walk(podcastPath):
 				last['config'] = False
 			else:
 				last['config'] = config
-		fileList.append(os.path.join(root,file))
+		if time.time() - os.stat(os.path.join(root,file)).st_ctime < 10:
+			log("Skipped " + file + ", too new", 'yellow')
+		else:
+			fileList.append(os.path.join(root,file))
 
 rawFiles = {}
 pattern = re.compile("^.+\/([^\/]+)-"+rawSuffix+"(\d)?\.([^\.^-]+)$")
@@ -580,52 +587,51 @@ for file in fileList:
 		data = parts.group(0,1,2,3)
 		basename,name,quality,ext = data
 		if ext in fileTypes:
-			if time.time() - os.stat(file).st_ctime < 20:
-				log("Skipping " + os.path.basename(file) + ", too new")
-			else:
-				if quality == rawSuffix:
-					config = getConfig(file)
-					metadata = youtubeUpload.getMetadata(file)
+			if quality == rawSuffix:
+				config = getConfig(file)
+				metadata = youtubeUpload.getMetadata(file)
+				if not metadata:
+					log("Missing metadata for file " + file, 'red')
+					continue
+				if metadata.get('quarantine') == "true":
+					log(file+" is in quarantine!", "red")
+					continue
 
-					if metadata.get('quarantine') == "true":
-						log(file+" is in quarantine!", "red")
-						continue
+				# Check if videos are to be uploaded to YouTube
+				if config.get('youtubeUpload') == True and not metadata.get('enotelms:YouTubeUID'):
+					youtube = config.get('youtube');
+					if youtube.get('uploadVersion'):
+						version = youtube.get('uploadVersion')
+					else:
+						version = "720p"
+					config['youtube']['uploadVersion'] = version
+					if versionExists(file, version):
+						username = youtube.get('username')
+						password = youtube.get('password')
+						developer_key = youtube.get('developerKey')
+						playlist = youtube.get('playlist')
+						if username and password and developer_key:
+							filename = file.replace(rawSuffix, version)
+							youtubeUpload.addToQueue(filename, youtube.copy())
+				# Check if videos are to be converted
+				if config.get("convert") == True:
+					for format in config.get('formats'):
+						preset = config.get('presets').get(format)
+						if preset:
 
-					# Check if videos are to be uploaded to YouTube
-					if config.get('youtubeUpload') == True and not metadata.get('enotelms:YouTubeUID'):
-						youtube = config.get('youtube');
-						if youtube.get('uploadVersion'):
-							version = youtube.get('uploadVersion')
+							if not versionExists(file, preset.get('suffix')):
+								conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config}
+								videoConvert.queue.append(conversionJob)
 						else:
-							version = "720p"
-						config['youtube']['uploadVersion'] = version
-						if versionExists(file, version):
-							username = youtube.get('username')
-							password = youtube.get('password')
-							developer_key = youtube.get('developerKey')
-							playlist = youtube.get('playlist')
-							if username and password and developer_key:
-								filename = file.replace(rawSuffix, version)
-								youtubeUpload.addToQueue(filename, youtube.copy())
-					# Check if videos are to be converted
-					if config.get("convert") == True:
-						for format in config.get('formats'):
-							preset = config.get('presets').get(format)
-							if preset:
-
-								if not versionExists(file, preset.get('suffix')):
-									conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config}
-									videoConvert.queue.append(conversionJob)
-							else:
-								log("Format '" + format + "' not found. Available ones are (" + ', '.join(format for format in config.get('presets')) + ")")
-					# Generate thumbnails if missing
-					thumbnail = re.sub("-" + rawSuffix + "\.(" + "|".join(fileTypes) + ")", "-1.png", file)
-					if not os.path.isfile(thumbnail):
-						try:
-							videoConvert.executeCommand("ffmpeg -ss 0.5 -i '"+file+"' -vframes 1 -s 640x360 '"+thumbnail+"'")
-						except executeException:
-							log("Error generating thumbnail: " + thumbnail, 'red')
-						else:
-							log("Generated thumbnail: " + thumbnail, 'green')
+							log("Format '" + format + "' not found. Available ones are (" + ', '.join(format for format in config.get('presets')) + ")")
+				# Generate thumbnails if missing
+				thumbnail = re.sub("-" + rawSuffix + "\.(" + "|".join(fileTypes) + ")", "-1.png", file)
+				if not os.path.isfile(thumbnail):
+					try:
+						videoConvert.executeCommand("ffmpeg -ss 0.5 -i '"+file+"' -vframes 1 -s 640x360 '"+thumbnail+"'")
+					except executeException:
+						log("Error generating thumbnail: " + thumbnail, 'red')
+					else:
+						log("Generated thumbnail: " + thumbnail, 'green')
 
 mainThreadDone = True	
