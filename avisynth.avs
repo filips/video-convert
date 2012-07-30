@@ -1,15 +1,15 @@
 LoadCPlugin("C:\Program Files\AviSynth 2.5\plugins\ffms2.dll")
-LoadPlugin("C:\Program Files\AviSynth 2.5\plugins\TransAll.dll")
 
 global introOutro = {introOutro}
 global brandClips = {brandClips}
+global framerate  = {fps}
 
 introOutro ? Eval("""
-	introraw = FFmpegSource2("{intro}", atrack=-1, fpsnum=25)
+	introraw = FFmpegSource2("{intro}", atrack=-1, fpsnum=framerate)
 	whitebox = BlankClip(120,width=380,height=85,color=$FFFFFF)
 	intro = Overlay(introraw,whitebox,x=335,y=380,mode="Blend",opacity=1)
 	intro = Overlay(intro,whitebox,x=900,y=635,mode="Blend",opacity=1)
-	outro = FFmpegSource2("{outro}", atrack=-1, fpsnum=25)
+	outro = FFmpegSource2("{outro}", atrack=-1, fpsnum=framerate)
 
 	intro = SubtitleEx(intro,"{title}",font="Ubuntu",textcolor=$323586,halocolor=$FFFFFF, size=50,x=340,y=450)
 	intro = SubtitleEx(intro,"{course}",font="Ubuntu",textcolor=$323586,halocolor=$FFFFFF, size=25,x=340,y=410)
@@ -25,8 +25,9 @@ function brandClip(clip c) {{
 	Overlay(c, logo, mask=logomask, x=1183, y=20, opacity=0.8)
 }}
 
-function addVideoClip(string s, int start, int end) {{
-	clip = FFmpegSource2(s,atrack=-1, fpsnum=25).Trim(start, end)
+function addVideoClip(string s, float start, float end) {{
+	clip = FFmpegSource2(s,atrack=-1, fpsnum=framerate, threads=1)
+	clip = Trim(clip, Round(start * framerate), Framecount(clip) - Round(end * framerate))
 	brandClips ? Eval("""
 		clip = brandClip(clip)
 	""") : ""	

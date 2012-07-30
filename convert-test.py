@@ -43,6 +43,9 @@ conversionList = []
 # The drive letter in Wine correlating to linux "/"
 wineDrive = "z"
 
+# Video framerate. Should be configurable on a per-channel basis
+fps = 25 
+
 # Don't change
 logging = True
 pendingLog = []
@@ -213,15 +216,28 @@ class videoConvert(threading.Thread):
 			outro = self.winPath(dirname + "outro.mp4")
 		else:
 			outro = defaultOutro
+		
+		startOffset = metadata.get('startOffset')
+		endOffset   = metadata.get('endOffset')
 
 		if title and course_id and pubdate:
-			template = open(scriptDir + "avisynth.avs", 'r').read()
+			template = open(scriptDir + "convert/avisynth.avs", 'r').read()
 			videoList = ""
 			for i in range(len(options['files'])):
-				videoList += "addVideoClip(\"" + self.winPath(options['files'][i]) + "\",0,0)"
+
+				try:
+					soff = startOffset[i]
+				except (IndexError, TypeError) as e:
+					soff = 0
+				try:
+					eoff = endOffset[i]
+				except (IndexError, TypeError):
+					eoff = 0
+
+				videoList += "addVideoClip(\"" + self.winPath(options['files'][i]) + "\","+str(soff)+","+str(eoff)+")"
 				if i != len(options['files'])-1:
 					videoList += ","
-			template = template.format(intro = intro, video = path, outro = outro, title=title, course=course_id, date=pubdate, introOutro="True", brandClips="True", videoList=videoList)
+			template = template.format(intro = intro, video = path, outro = outro, title=title, course=course_id, date=pubdate, introOutro="True", brandClips="True", videoList=videoList, fps=fps)
 
 			script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.avs', 'w')
 			script.write(template.decode('utf-8').encode('latin-1'))
@@ -300,8 +316,8 @@ class videoConvert(threading.Thread):
 		log = ""
 		try:
 			log += self.executeCommand("wine avs2pipe audio \"" + avsScript + "\" > \"" + audioFile + "\"")
-			log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps 25 --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
-			log += self.executeCommand("yes | ffmpeg -r 25 -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\"")
+			log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
+			log += self.executeCommand("yes | ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\"")
 		except Exception:
 			raise
 		finally:
@@ -315,7 +331,7 @@ class videoConvert(threading.Thread):
 	def handbrakeConversion(self, job):
 		options = job['options']
 		handBrakeArgs = "-e x264 -q " + str(options['quality']) + " -B " + str(options['audiobitrate']) + " -w " + str(options['width']) + " -l " + str(options['height'])	
-		cmd = "nice -n " + str(NICENESS) + " " + HandBrakeCLI + " --cpu " + str(CPUS) + " " + handBrakeArgs + " -r 25 -i '" + job['path'][0] + "' -o '" + job['outputFile'] + ".mp4'"
+		cmd = "nice -n " + str(NICENESS) + " " + HandBrakeCLI + " --cpu " + str(CPUS) + " " + handBrakeArgs + " -r "+str(fps)+" -i '" + job['path'][0] + "' -o '" + job['outputFile'] + ".mp4'"
 		return self.executeCommand(cmd)
 
 
@@ -403,7 +419,11 @@ class youtubeUpload (threading.Thread):
 			for line in lines:
 				match = re.search('^\s*([^#^\s]\S+)\s*=\s*([^\[^\s]\S.*\S|\S)\s*$', line)
 				if match:
-					metadata[match.group(1)] = match.group(2)
+					submatch = re.search('^{(.+)}$', match.group(2))
+					if submatch:
+						metadata[match.group(1)] = submatch.group(1).split(',')
+					else:
+						metadata[match.group(1)] = match.group(2)
 			return metadata
 		else:
 			return False
