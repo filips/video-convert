@@ -298,6 +298,7 @@ class videoConvert(threading.Thread):
 			else:
 				# BUG: Fallthrough if branding is disabled and more than one raw file is found!
 				log("Avisynth conversion of " + rawFiles[0] + " to " + conversionJob['preset'])
+				log("Job consists of " + str(len(rawFiles)) + " raw files")
 				convertLog = self.avisynthConversion(conversionJob)
 		except metadataException as e:
 			log("Missing metadata for file " + rawFiles[0], 'red')
