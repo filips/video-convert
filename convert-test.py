@@ -8,6 +8,7 @@ import gdata.youtube
 import gdata.youtube.service
 from collections import deque
 import smtplib
+from termcolor import colored
 
 ##########################################
 ########### CONSTANTS ####################
@@ -55,9 +56,11 @@ mainThreadDone = False
 ########### STANDALONE METHODS ###########
 ##########################################
 
-def log(string):
+def log(string, color="white"):
 	now = datetime.datetime.now()
-	logstr = "[" + str(now)[:19] + "] " + str(string)
+	date = "[" + str(now)[:19] + "] "
+	message = str(string)
+	logstr = date + message
 	if logging:
 		pendingLog.append(logstr)
 		while len(pendingLog) > 0:
@@ -65,7 +68,7 @@ def log(string):
 			logFile.flush()
 	else:
 		pendingLog.append(logstr)
-	print logstr
+	print colored(date, 'cyan'), colored(message, color)
 
 # Find out if another instance of the script is running
 def isRunning():
@@ -172,10 +175,11 @@ class videoConvert(threading.Thread):
 					log("Couldn't get video information for " + element['path'][0] + " , skipping!")
 					error = True
 				else:
-					log("Video contains " + str(numStreams) + " videostrems, and was skipped! ("+element['path'][0]+")")
+					log("Video contains " + str(numStreams) + " videostrems, and was quarantined! ("+element['path'][0]+")", 'red')
+					youtubeUpload.writeMetadata(element['path'][0], {"quarantine": "true"})
 					error = True
 			time.sleep(0.5)
-		print "Main thread exited, terminating videoConvert..."
+		log("Main thread exited, terminating videoConvert...")
 	@staticmethod
 	def executeCommand(cmd):
 		process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -208,6 +212,16 @@ class videoConvert(threading.Thread):
 		pubdate = metadata.get('pubDate')
 		dirname = os.path.dirname(options['path'][0]) + "/"
 
+		startOffset = metadata.get('startOffset')
+		endOffset   = metadata.get('endOffset')
+
+		if options['config'].get('branding') == True:
+			branding = True
+			inout    = True
+		else:
+			branding = False
+			inout    = False
+
 		if os.path.isfile(dirname + "intro.mp4"):
 			intro = self.winPath(dirname + "intro.mp4")
 		else:
@@ -216,9 +230,6 @@ class videoConvert(threading.Thread):
 			outro = self.winPath(dirname + "outro.mp4")
 		else:
 			outro = defaultOutro
-		
-		startOffset = metadata.get('startOffset')
-		endOffset   = metadata.get('endOffset')
 
 		if title and course_id and pubdate:
 			template = open(scriptDir + "convert/avisynth.avs", 'r').read()
@@ -237,7 +248,19 @@ class videoConvert(threading.Thread):
 				videoList += "addVideoClip(\"" + self.winPath(options['files'][i]) + "\","+str(soff)+","+str(eoff)+")"
 				if i != len(options['files'])-1:
 					videoList += ","
-			template = template.format(intro = intro, video = path, outro = outro, title=title, course=course_id, date=pubdate, introOutro="True", brandClips="True", videoList=videoList, fps=fps)
+
+			template = template.format(
+				intro = intro, 
+				video = path, 
+				outro = outro, 
+				title=title, 
+				course=course_id, 
+				date=pubdate, 
+				introOutro=inout, 
+				brandClips=branding, 
+				videoList=videoList, 
+				fps=fps
+				)
 
 			script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.avs', 'w')
 			script.write(template.decode('utf-8').encode('latin-1'))
@@ -277,21 +300,21 @@ class videoConvert(threading.Thread):
 				log("Avisynth conversion of " + rawFiles[0] + " to " + conversionJob['preset'])
 				convertLog = self.avisynthConversion(conversionJob)
 		except metadataException as e:
-			log("Missing metadata for file " + rawFiles[0])
+			log("Missing metadata for file " + rawFiles[0], 'red')
 			return False
 		except executeException as e:
 			print "error"
 			print e
-			log("Encoding of " + outputFile + " failed!")
+			log("Encoding of " + outputFile + " failed!", 'red')
 		except Exception as e:
 			print e
 		else:
 			if os.path.isfile(outputFile):
-				log("Encoding of " + outputFile + " succeded!")
+				log("Encoding of " + outputFile + " succeded!", 'green')
 				shutil.move(outputFile, finalDestination)
 				success = True
 			else:
-				log("Encoding of " + outputFile + " failed!")
+				log("Encoding of " + outputFile + " failed!", 'red')
 
 		if convertLog:
 			fp = open(outputFile.replace(".mp4",".log"), "w")
@@ -347,7 +370,7 @@ class youtubeUpload (threading.Thread):
 				element = self.queue.popleft()
 				metadata = self.getMetadata(element['filename'])
 				if metadata.get("enotelms:YouTubeUID"):
-					log("Video is already on YouTube: " + element['filename'])
+					log("Video is already on YouTube: " + element['filename'], 'yellow')
 					continue
 				else:
 					self.yt_service = self.authenticate(element['username'],element['password'],element['developerKey'])
@@ -355,7 +378,7 @@ class youtubeUpload (threading.Thread):
 					if video_id != False:
 						self.writeMetadata(element['filename'],{"enotelms:YouTubeUID": video_id})
 					else:
-						log("Youtube upload failed!")
+						log("Youtube upload failed!", 'red')
 			time.sleep(0.5)
 		log("Main thread exited, terminating youtubeUpload...")
 
@@ -369,11 +392,11 @@ class youtubeUpload (threading.Thread):
 			private = False
 		missing = validateList(metadata, ["title", "description"])
 		if missing.__len__() > 0:
-			log("Missing options: " + ", ".join(missing) + " for file " + preferences['filename'])
+			log("Missing options: " + ", ".join(missing) + " for file " + preferences['filename'], 'red')
 			return False
 		if not metadata.get('keywords'):
 			metadata['keywords'] = defaultYoutubeKeywords
-			log("WARNING: No keywords specified for file: " + preferences['filename'] + "!")
+			log("WARNING: No keywords specified for file: " + preferences['filename'] + "!", 'yellow')
 
 		options = {
 			"title": metadata['title'],
@@ -427,8 +450,9 @@ class youtubeUpload (threading.Thread):
 			return metadata
 		else:
 			return False
-			
-	def writeMetadata(self,file,data):
+	
+	@staticmethod
+	def writeMetadata(file,data):
 		metafile = re.split('-\w+\.\w+$',file)[0] + ".txt"
 		if os.path.isfile(metafile):
 			f = open(metafile, 'a')
@@ -444,7 +468,7 @@ class youtubeUpload (threading.Thread):
 	def addPlaylist(self, playlist):
 		new_playlist = self.yt_service.AddPlaylist(playlist,'')
 		if isinstance(new_playlist, gdata.youtube.YouTubePlaylistEntry):
-			log('Added playlist "' + playlist + '"')
+			log('Added playlist "' + playlist + '"', 'green')
 			return new_playlist
 	def addToPlaylist(self, video_id, playlist):
 		playlists = self.retrievePlaylists()
@@ -456,9 +480,9 @@ class youtubeUpload (threading.Thread):
 
 		entry = self.yt_service.AddPlaylistVideoEntryToPlaylist(url, video_id)
 		if isinstance(entry, gdata.youtube.YouTubePlaylistVideoEntry):
-			log("Video added to playlist '" + playlist + "'")
+			log("Video added to playlist '" + playlist + "'", 'green')
 		else:
-			log("Video NOT added to playlist")
+			log("Video NOT added to playlist", 'red')
 		pass
 	def uploadVideo(self, options):
 		if options['private'] == True:
@@ -496,7 +520,7 @@ class youtubeUpload (threading.Thread):
 ##########################################
 
 if isRunning():
-	log("Another instance is already running. Exiting.")
+	log("Another instance is already running. Exiting.", 'red')
 	sys.exit(0)
 
 log("Convert script launched")
@@ -524,7 +548,7 @@ for root, subFolders, files in os.walk(podcastPath):
 			try:
 				config = json.loads(configFile)
 			except ValueError:
-				log("Error importing config file in '" + root + "'. Not doing *any* conversion beyond this path.")
+				log("Error importing config file in '" + root + "'. Not doing *any* conversion beyond this path.", 'red')
 				last['config'] = False
 			else:
 				last['config'] = config
@@ -556,9 +580,14 @@ for file in fileList:
 			else:
 				if quality == rawSuffix:
 					config = getConfig(file)
+					metadata = youtubeUpload.getMetadata(file)
+
+					if metadata.get('quarantine') == "true":
+						log(file+" is in quarantine!", "red")
+						continue
 
 					# Check if videos are to be uploaded to YouTube
-					if config.get('youtubeUpload') == True:
+					if config.get('youtubeUpload') == True and not metadata.get('enotelms:YouTubeUID'):
 						youtube = config.get('youtube');
 						if youtube.get('uploadVersion'):
 							version = youtube.get('uploadVersion')
@@ -584,15 +613,14 @@ for file in fileList:
 									videoConvert.queue.append(conversionJob)
 							else:
 								log("Format '" + format + "' not found. Available ones are (" + ', '.join(format for format in config.get('presets')) + ")")
-					
 					# Generate thumbnails if missing
 					thumbnail = re.sub("-" + rawSuffix + "\.(" + "|".join(fileTypes) + ")", "-1.png", file)
 					if not os.path.isfile(thumbnail):
 						try:
 							videoConvert.executeCommand("ffmpeg -ss 0.5 -i '"+file+"' -vframes 1 -s 640x360 '"+thumbnail+"'")
 						except executeException:
-							log("Error generating thumbnail: " + thumbnail)
+							log("Error generating thumbnail: " + thumbnail, 'red')
 						else:
-							log("Generated thumbnail: " + thumbnail)
+							log("Generated thumbnail: " + thumbnail, 'green')
 
 mainThreadDone = True	
