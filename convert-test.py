@@ -186,7 +186,18 @@ class videoConvert(threading.Thread):
 	@staticmethod
 	def executeCommand(cmd):
 		process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-		stdout, stderr = process.communicate()
+		#stdout, stderr = process.communicate()
+		stdout = ''
+		while True:
+			output = process.stdout.read(1)
+			if output == '' and process.poll() != None:
+				break
+			if output != '':
+				if len(sys.argv) > 1 and sys.argv[1] == '-v':
+					sys.stdout.write(output)
+				sys.stdout.flush()
+				stdout += output
+
 		if process.returncode > 0:
 			raise executeException({"returncode": process.returncode, "cmd": cmd})
 		return stdout
@@ -226,12 +237,12 @@ class videoConvert(threading.Thread):
 			branding = False
 			inout    = False
 
-		if os.path.isfile(dirname + "intro.mp4"):
-			intro = self.winPath(dirname + "intro.mp4")
+		if os.path.isfile(dirname + "intro.mov"):
+			intro = self.winPath(dirname + "intro.mov")
 		else:
 			intro = defaultIntro
-		if os.path.isfile(dirname + "outro.mp4"):
-			outro = self.winPath(dirname + "outro.mp4")
+		if os.path.isfile(dirname + "outro.mov"):
+			outro = self.winPath(dirname + "outro.mov")
 		else:
 			outro = defaultOutro
 
@@ -344,7 +355,8 @@ class videoConvert(threading.Thread):
 		log = ""
 		try:
 			log += self.executeCommand("wine avs2pipe audio \"" + avsScript + "\" > \"" + audioFile + "\"")
-			log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
+			#log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
+			log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --input-res 1280x720 --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
 			log += self.executeCommand("yes | ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\"")
 		except Exception:
 			raise

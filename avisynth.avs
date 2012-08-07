@@ -5,15 +5,12 @@ global brandClips = {brandClips}
 global framerate  = {fps}
 
 introOutro ? Eval("""
-	introraw = FFmpegSource2("{intro}", atrack=-1, fpsnum=framerate)
-	whitebox = BlankClip(120,width=380,height=85,color=$FFFFFF)
-	intro = Overlay(introraw,whitebox,x=335,y=380,mode="Blend",opacity=1)
-	intro = Overlay(intro,whitebox,x=900,y=635,mode="Blend",opacity=1)
-	outro = FFmpegSource2("{outro}", atrack=-1, fpsnum=framerate)
+	intro = FFmpegSource2("{intro}", atrack=-1, fpsnum=framerate).ConvertToYUY2()
+	outro = FFmpegSource2("{outro}", atrack=-1, fpsnum=framerate).ConvertToYUY2()
 
-	intro = SubtitleEx(intro,"{title}",font="Ubuntu",textcolor=$323586,halocolor=$FFFFFF, size=50,x=340,y=450)
-	intro = SubtitleEx(intro,"{course}",font="Ubuntu",textcolor=$323586,halocolor=$FFFFFF, size=25,x=340,y=410)
-	intro = SubtitleEx(intro,"{date}",font="Ubuntu",textcolor=$CCCCCC,halocolor=$FFFFFF, size=30,-20,y=-20)
+	intro = SubtitleEx(intro,UCase("{title}"),font="Neo Sans Std Medium",textcolor=$1B4184,halocolor=$FFFFFF, size=58,x=340,y=470)
+	intro = SubtitleEx(intro,UCase("{course}"),font="Neo Sans Std", effects="",textcolor=$1B4184,halocolor=$FFFFFF, size=34,x=340,y=420)
+	intro = SubtitleEx(intro,"{date}",font="Neo Sans Std",effects="",textcolor=$CCCCCC,halocolor=$FFFFFF, size=36,-20,y=-20)
 	intro = FadeOut(intro, 10)
 	subtitleex(intro,"test")
 """) : ""
@@ -26,7 +23,7 @@ function brandClip(clip c) {{
 }}
 
 function addVideoClip(string s, float start, float end) {{
-	clip = FFmpegSource2(s,atrack=-1, fpsnum=framerate, threads=1)
+	clip = FFmpegSource2(s,atrack=-1, fpsnum=framerate, threads=1).ConvertToYUY2()
 	clip = Trim(clip, Round(start * framerate), Framecount(clip) - Round(end * framerate))
 	brandClips ? Eval("""
 		clip = brandClip(clip)
