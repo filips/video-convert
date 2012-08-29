@@ -262,7 +262,7 @@ class videoConvert(threading.Thread):
 
 				videoList += "addVideoClip(\"" + self.winPath(options['files'][i]) + "\","+str(soff)+","+str(eoff)+")"
 				if i != len(options['files'])-1:
-					videoList += ","
+					videoList += " ++ "
 
 			template = template.format(
 				intro = intro, 
@@ -356,7 +356,7 @@ class videoConvert(threading.Thread):
 		try:
 			log += self.executeCommand("wine avs2pipe audio \"" + avsScript + "\" > \"" + audioFile + "\"")
 			#log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
-			log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --input-res 1280x720 --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
+			log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
 			log += self.executeCommand("yes | ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\"")
 		except Exception:
 			raise

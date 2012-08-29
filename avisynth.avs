@@ -16,10 +16,9 @@ introOutro ? Eval("""
 """) : ""
 
 function brandClip(clip c) {{
-	logo = ImageSource("z:\home\typothree\logo.png")
-	logo = GreyScale(logo)
-	logomask = ImageSource("z:\home\typothree\logo.png",pixel_type="RGB32").ShowAlpha(pixel_type="RGB32")
-	Overlay(c, logo, mask=logomask, x=1183, y=20, opacity=0.8)
+	logo = ImageSource("z:\home\typothree\VideoParts\logo.png")
+	logomask = ImageSource("z:\home\typothree\VideoParts\logo.png",pixel_type="RGB32").ShowAlpha(pixel_type="YUY2")
+	Overlay(c, logo, mask=logomask)
 }}
 
 function addVideoClip(string s, float start, float end) {{
@@ -34,7 +33,7 @@ function addVideoClip(string s, float start, float end) {{
 
 
 introOutro ? Eval("""
-	AlignedSplice(intro, {videoList}, outro)
+	intro ++ {videoList} ++ outro
 """) : Eval("""
-	AlignedSplice({videoList})
+	{videoList}
 """)
