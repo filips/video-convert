@@ -9,12 +9,14 @@ import gdata.youtube.service
 from collections import deque
 import smtplib
 from termcolor import colored
+import textwrap
 
 ##########################################
 ########### CONSTANTS ####################
 ##########################################
 
-podcastPath = "/home/typothree/podcasts/TEST"
+#NO trailing slash on podcastPath!!
+podcastPath = "/home/typothree/podcasts"
 scriptDir = "/home/typothree/VideoParts/"
 HandBrakeCLI = "/home/typothree/prefix/bin/HandBrakeCLI"
 
@@ -23,8 +25,8 @@ defaultYoutubeCategory = "Education"
 defaultYoutubeKeywords = "Education"
 
 # Default intro and outro video in case branding is specified, but no custom files are found
-defaultIntro = "z:\\home\\typothree\\VideoParts\\intro.mp4"
-defaultOutro = "z:\\home\\typothree\\VideoParts\\outro.mp4"
+defaultIntro = "z:\\home\\typothree\\VideoParts\\intro.mov"
+defaultOutro = "z:\\home\\typothree\\VideoParts\\outro.mov"
 
 rawSuffix = "raw" # Used to be 720p
 
@@ -183,6 +185,53 @@ class videoConvert(threading.Thread):
 					error = True
 			time.sleep(0.5)
 		log("Main thread exited, terminating videoConvert...")
+
+	def generateIntroOverlay(self, title, course, date,file):
+		import Image, ImageDraw, ImageFont
+
+		width, height = 1280, 720
+		titleOffsetX = 340
+
+		img = Image.new("RGBA", (width, height), (0,0,0,0))
+		draw = ImageDraw.Draw(img)
+		titleFont = ImageFont.truetype("/home/typothree/.fonts/NeoSansStd-Medium.otf", 40, encoding='unic')
+		courseFont = ImageFont.truetype("/home/typothree/.fonts/NeoSansStd-Regular.otf", 24, encoding='unic')
+		dateFont = ImageFont.truetype("/home/typothree/.fonts/NeoSansStd-Regular.otf", 24, encoding='unic')
+
+		title = "BLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAH Blah blha blablabl blab alb ab bal"
+		dateSize = dateFont.getsize(date)
+		titleSize = titleFont.getsize(title)
+
+		maxWidth = width - titleOffsetX - 175
+
+		titleSegments = []
+		tempSegment = ""
+		for word in title.split():
+			if titleFont.getsize(tempSegment + word)[0] <= maxWidth:
+				tempSegment = tempSegment + word + " "
+			elif titleFont.getsize(word)[0] <= maxWidth:
+				if len(tempSegment) > 0:
+					titleSegments.append(tempSegment)
+				tempSegment = word + " "
+			else:
+				if len(tempSegment) > 0:
+					titleSegments.append(tempSegment)
+				tempWord = ""
+				for letter in word:
+					if titleFont.getsize(tempWord + letter)[0] <= maxWidth:
+						tempWord = tempWord + letter
+					else:
+						titleSegments.append(tempWord)
+						tempWord = letter
+				tempSegment = tempWord
+		titleSegments.append(tempSegment)
+
+		for key,part in enumerate(titleSegments):
+			draw.text((titleOffsetX, 430 + 45*key), part.upper(), font=titleFont, fill=(27,65,132,255))
+		draw.text((titleOffsetX, 400), course.upper(), font=courseFont, fill=(27,65,132,255))
+		draw.text((width-dateSize[0] - 20, height-dateSize[1] - 20), date, font=dateFont, fill=(204,204,204,255))
+		img.save(file)
+
 	@staticmethod
 	def executeCommand(cmd):
 		process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -226,6 +275,8 @@ class videoConvert(threading.Thread):
 		course_id = options['config'].get('course_id')
 		pubdate = metadata.get('pubDate')
 		dirname = os.path.dirname(options['path'][0]) + "/"
+
+		self.generateIntroOverlay(title, course_id, pubdate, scriptDir+"Konverterede/" + options['path'][1] + '-introOverlay.png')
 
 		startOffset = metadata.get('startOffset')
 		endOffset   = metadata.get('endOffset')
@@ -274,7 +325,8 @@ class videoConvert(threading.Thread):
 				introOutro=inout, 
 				brandClips=branding, 
 				videoList=videoList, 
-				fps=fps
+				fps=fps,
+				introoverlay=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-introOverlay.png')
 				)
 
 			script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.avs', 'w')

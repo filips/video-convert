@@ -8,9 +8,14 @@ introOutro ? Eval("""
 	intro = FFmpegSource2("{intro}", atrack=-1, fpsnum=framerate).ConvertToYUY2()
 	outro = FFmpegSource2("{outro}", atrack=-1, fpsnum=framerate).ConvertToYUY2()
 
-	intro = SubtitleEx(intro,UCase("{title}"),font="Neo Sans Std Medium",textcolor=$1B4184,halocolor=$FFFFFF, size=58,x=340,y=470)
-	intro = SubtitleEx(intro,UCase("{course}"),font="Neo Sans Std", effects="",textcolor=$1B4184,halocolor=$FFFFFF, size=34,x=340,y=420)
-	intro = SubtitleEx(intro,"{date}",font="Neo Sans Std",effects="",textcolor=$CCCCCC,halocolor=$FFFFFF, size=36,-20,y=-20)
+	#intro = SubtitleEx(intro,UCase("{title}"),font="Neo Sans Std Medium",textcolor=$1B4184,halocolor=$FFFFFF, size=58,x=340,y=470)
+	#intro = SubtitleEx(intro,UCase("{course}"),font="Neo Sans Std", effects="",textcolor=$1B4184,halocolor=$FFFFFF, size=34,x=340,y=420)
+	#intro = SubtitleEx(intro,"{date}",font="Neo Sans Std",effects="",textcolor=$CCCCCC,halocolor=$FFFFFF, size=36,-20,y=-20)
+
+	introtext = ImageSource("{introoverlay}")
+	intromask = ImageSource("{introoverlay}",pixel_type="RGB32").ShowAlpha(pixel_type="YUY2")
+	intro = Overlay(intro, introtext, mask=intromask)
+
 	intro = FadeOut(intro, 10)
 	subtitleex(intro,"test")
 """) : ""
