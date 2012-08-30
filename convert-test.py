@@ -91,9 +91,9 @@ def isRunning():
 		fp.close()
 		return False
 
-def versionExists(file, suffix):
+def versionExists(file, localSuffix, suffix):
 	for filetype in fileTypes:
-		filename = re.sub(rawSuffix+".+$",suffix, file) + "." + filetype
+		filename = re.sub(localSuffix+".+$",suffix, file) + "." + filetype
 		if filename in fileList:
 			return True
 		elif os.path.isfile(filename) and os.stat(filename).st_ctime >= 10:
@@ -161,14 +161,26 @@ class videoConvert(threading.Thread):
 			if self.queue.__len__() > 0:
 				log("Currently "+str(self.queue.__len__()) + " items queued for conversion.")
 				element = self.queue.popleft()
-				numStreams = self.videoInfo(element['path'][0])
+
+				resolutionError = False
+				for key in element['files']:
+					info = self.videoInfo(element['files'][key])
+					numStreams = info['videoStreams']
+					width, height = info['width'], info['height']
+					if (width, height) != (1280, 720):
+						log("Videofile " + element['files'][key] + " has resolution " + str(width) + "x" + str(height) + " and was quarantined!", 'red')
+						youtubeUpload.writeMetadata(element['path'][0], {"quarantine": "true"})
+						resolutionError = True
+				if resolutionError:
+					continue
+
 				error = False
 				if numStreams == 1:
 					if self.handleConversionJob(element):
 
 						# Adding job to youtubeUpload's queue. Should probably be handled by a watcher thread instead
 						youtubeConfig = element['config'].get("youtube")
-						destination = re.sub(rawSuffix, element['options']['suffix'],element['path'][0])
+						destination = re.sub(element['rawSuffix'], element['options']['suffix'],element['path'][0])
 						if youtubeConfig and element['config'].get('youtubeUpload') == True:
 							if element.get("preset") == youtubeConfig.get("uploadVersion"):
 								youtubeUpload.addToQueue(destination, youtubeConfig)
@@ -198,7 +210,6 @@ class videoConvert(threading.Thread):
 		courseFont = ImageFont.truetype("/home/typothree/.fonts/NeoSansStd-Regular.otf", 24, encoding='unic')
 		dateFont = ImageFont.truetype("/home/typothree/.fonts/NeoSansStd-Regular.otf", 24, encoding='unic')
 
-		title = "BLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAHBLAH Blah blha blablabl blab alb ab bal"
 		dateSize = dateFont.getsize(date)
 		titleSize = titleFont.getsize(title)
 
@@ -255,12 +266,27 @@ class videoConvert(threading.Thread):
 	def videoInfo(self, file):
 		try:
 			numStreams = int(self.executeCommand("ffprobe \""+file+"\" 2>&1 | awk '/Stream .+ Video/{print $0}' | wc -l"))
+			metaData = self.executeCommand("exiftool \""+file+"\"")
+			info = {}
+			for line in metaData.splitlines():
+				key, value = [x.strip() for x in line.split(" : ")]
+				info[key] = value
+			
+			length = info['Duration'].split(":")
+			secs = int(length[0]) * 3600 + int(length[1]) * 60 + int(length[2])
+
+			videoinfo = {
+				"videoStreams": numStreams,
+				"height": int(info['Image Height']),
+				"width": int(info['Image Width']),
+				"length": secs
+			}
 		except executeException:
 			return False
 		except ValueError:
 			return False
 		else:
-			return numStreams
+			return videoinfo
 
 	def winPath(self, unix_path):
 		return wineDrive + ":" + unix_path.replace("/","\\")
@@ -347,7 +373,7 @@ class videoConvert(threading.Thread):
 
 		conversionJob['outputFile'] = scriptDir+"Konverterede/" + conversionJob['path'][1] + "-"+ conversionJob['options']['suffix']
 		outputFile = conversionJob['outputFile']
-		finalDestination = re.sub(rawSuffix+"\..+", conversionJob['options']['suffix'] + ".mp4",conversionJob['path'][0])
+		finalDestination = re.sub(conversionJob['rawSuffix']+"\..+", conversionJob['options']['suffix'] + ".mp4",conversionJob['path'][0])
 		if os.path.isfile(finalDestination):
 			log("File " + finalDestination + " already exists!")
 			return False
@@ -360,7 +386,7 @@ class videoConvert(threading.Thread):
 
 		try:
 			if not conversionJob['config'].get('branding') == True and len(rawFiles) == 1:
-				log("HandBrake conversion of " + rawFiles[0] + "...")
+				log("HandBrake conversion of " + rawFiles[0] + " to " + conversionJob['preset'])
 				convertLog = self.handbrakeConversion(conversionJob)
 			else:
 				# BUG: Fallthrough if branding is disabled and more than one raw file is found!
@@ -631,9 +657,17 @@ for root, subFolders, files in os.walk(podcastPath):
 			fileList.append(os.path.join(root,file))
 
 rawFiles = {}
-pattern = re.compile("^.+\/([^\/]+)-"+rawSuffix+"(\d)?\.([^\.^-]+)$")
+patterns = {}
+patterns[rawSuffix] = re.compile("^.+\/([^\/]+)-"+rawSuffix+"(\d)?\.([^\.^-]+)$")
 for path in fileList:
-	parts = pattern.search(path)
+	localConfig = getConfig(path)
+	localSuffix = localConfig.get('rawSuffix')
+	if localSuffix:
+		if not patterns.get(localSuffix):
+			patterns[localSuffix] =  re.compile("^.+\/([^\/]+)-"+localSuffix+"(\d)?\.([^\.^-]+)$")
+		parts = patterns[localSuffix].search(path)
+	else:
+		parts = patterns[rawSuffix].search(path)
 	if parts:
 		if not parts.group(1) in rawFiles:
 			rawFiles[parts.group(1)] = {}
@@ -651,7 +685,11 @@ for file in fileList:
 		data = parts.group(0,1,2,3)
 		basename,name,quality,ext = data
 		if ext in fileTypes:
-			if quality == rawSuffix:
+			localConfig = getConfig(file)
+			localSuffix = localConfig.get('rawSuffix')
+			if not localSuffix:
+				localSuffix = rawSuffix
+			if quality == localSuffix:
 				config = getConfig(file)
 				metadata = youtubeUpload.getMetadata(file)
 				if not metadata:
@@ -669,13 +707,13 @@ for file in fileList:
 					else:
 						version = "720p"
 					config['youtube']['uploadVersion'] = version
-					if versionExists(file, version):
+					if versionExists(file, localSuffix, version):
 						username = youtube.get('username')
 						password = youtube.get('password')
 						developer_key = youtube.get('developerKey')
 						playlist = youtube.get('playlist')
 						if username and password and developer_key:
-							filename = file.replace(rawSuffix, version)
+							filename = file.replace(localSuffix, version)
 							youtubeUpload.addToQueue(filename, youtube.copy())
 				# Check if videos are to be converted
 				if config.get("convert") == True:
@@ -683,19 +721,20 @@ for file in fileList:
 						preset = config.get('presets').get(format)
 						if preset:
 
-							if not versionExists(file, preset.get('suffix')):
-								conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config}
+							if not versionExists(file, localSuffix, preset.get('suffix')):
+								conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config, "rawSuffix": localSuffix}
 								videoConvert.queue.append(conversionJob)
 						else:
 							log("Format '" + format + "' not found. Available ones are (" + ', '.join(format for format in config.get('presets')) + ")")
 				# Generate thumbnails if missing
-				thumbnail = re.sub("-" + rawSuffix + "\.(" + "|".join(fileTypes) + ")", "-1.png", file)
+				thumbnail = re.sub("-" + localSuffix + "\.(" + "|".join(fileTypes) + ")", "-1.png", file)
 				if not os.path.isfile(thumbnail):
+					info = vidConv.videoInfo(file)
 					try:
-						videoConvert.executeCommand("ffmpeg -ss 0.5 -i '"+file+"' -vframes 1 -s 640x360 '"+thumbnail+"'")
+						videoConvert.executeCommand("ffmpeg -ss "+str(info['length']/3)+" -i '"+file+"' -vframes 1 -s 640x360 '"+thumbnail+"'")
 					except executeException:
 						log("Error generating thumbnail: " + thumbnail, 'red')
 					else:
-						log("Generated thumbnail: " + thumbnail, 'green')
+						log("Generated thumbnail: " + thumbnail , 'green')
 
 mainThreadDone = True	
