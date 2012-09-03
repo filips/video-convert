@@ -1,4 +1,5 @@
 #!/usr/bin/python2.6
+# -*- coding: utf-8 -*-
 import os,re,time,subprocess,pprint,sys
 import simplejson as json
 import shutil
@@ -10,6 +11,8 @@ from collections import deque
 import smtplib
 from termcolor import colored
 import textwrap
+import locale
+import Image, ImageFont, ImageDraw, ImageChops
 
 ##########################################
 ########### CONSTANTS ####################
@@ -53,6 +56,9 @@ fps = 25
 logging = True
 pendingLog = []
 mainThreadDone = False
+
+# Locale primarily used in date formats. Should be customized in metadata
+locale.setlocale(locale.LC_ALL, "da_DK.UTF-8")
 
 ##########################################
 ########### STANDALONE METHODS ###########
@@ -206,21 +212,20 @@ class videoConvert(threading.Thread):
 
 		img = Image.new("RGBA", (width, height), (0,0,0,0))
 		draw = ImageDraw.Draw(img)
-		titleFont = ImageFont.truetype("/home/typothree/.fonts/NeoSansStd-Medium.otf", 40, encoding='unic')
-		courseFont = ImageFont.truetype("/home/typothree/.fonts/NeoSansStd-Regular.otf", 24, encoding='unic')
-		dateFont = ImageFont.truetype("/home/typothree/.fonts/NeoSansStd-Regular.otf", 24, encoding='unic')
+		titleFont = "/home/typothree/.fonts/NeoSansStd-Medium.otf"
+		titleFontEl = ImageFont.truetype(titleFont, 40, encoding='unic')
+		regularFont = "/home/typothree/.fonts/NeoSansStd-Regular.otf"
 
-		dateSize = dateFont.getsize(date)
-		titleSize = titleFont.getsize(title)
+		titleSize = titleFontEl.getsize(title)
 
 		maxWidth = width - titleOffsetX - 175
 
 		titleSegments = []
 		tempSegment = ""
 		for word in title.split():
-			if titleFont.getsize(tempSegment + word)[0] <= maxWidth:
+			if titleFontEl.getsize(tempSegment + word)[0] <= maxWidth:
 				tempSegment = tempSegment + word + " "
-			elif titleFont.getsize(word)[0] <= maxWidth:
+			elif titleFontEl.getsize(word)[0] <= maxWidth:
 				if len(tempSegment) > 0:
 					titleSegments.append(tempSegment)
 				tempSegment = word + " "
@@ -229,7 +234,7 @@ class videoConvert(threading.Thread):
 					titleSegments.append(tempSegment)
 				tempWord = ""
 				for letter in word:
-					if titleFont.getsize(tempWord + letter)[0] <= maxWidth:
+					if titleFontEl.getsize(tempWord + letter)[0] <= maxWidth:
 						tempWord = tempWord + letter
 					else:
 						titleSegments.append(tempWord)
@@ -237,12 +242,75 @@ class videoConvert(threading.Thread):
 				tempSegment = tempWord
 		titleSegments.append(tempSegment)
 
-		for key,part in enumerate(titleSegments):
-			draw.text((titleOffsetX, 430 + 45*key), part.upper(), font=titleFont, fill=(27,65,132,255))
-		draw.text((titleOffsetX, 400), course.upper(), font=courseFont, fill=(27,65,132,255))
-		draw.text((width-dateSize[0] - 20, height-dateSize[1] - 20), date, font=dateFont, fill=(204,204,204,255))
-		img.save(file)
+		date = datetime.datetime.strptime(date, "%Y-%m-%d %H:%M").strftime("%e. %B %Y")
 
+		strings = []
+		for key,part in enumerate(titleSegments):
+			strings.append([(titleOffsetX, 430 + 45*key), part.upper(), (27,65,132,255), 40, titleFont])
+		strings.append([(titleOffsetX, 400), course.upper(), (27,65,132,255), 24, regularFont])
+		strings.append([(-20,-1), date, (204,204,204,255), 24, regularFont])
+
+		self.drawText((width,height), strings).save(file)
+
+	def generateOutroOverlays(self, producer, technician, lecturer, year, file):
+		import Image, ImageDraw, ImageFont
+
+		width, height = 1280, 720
+		titleOffsetX = 340
+
+		font = "/home/typothree/.fonts/NeoSansStd-Regular.otf"
+		fontsize = 44
+		textcolor = (164,164,164,255)
+
+		copyright = u"\u00A9" + " "+year+" Danmarks Tekniske Universitet"
+		self.drawText((width, height), [[(-50, -40), copyright, textcolor, fontsize, font]]).save(file + "1.png")
+
+		strings = []
+
+		ypos = 200
+		if(lecturer):
+			text = u"Forelæser: " + lecturer
+			strings.append([(70, ypos), text, textcolor, fontsize-2, font])
+			ypos += fontsize
+		if(technician):
+			text = "Teknik: " + technician
+			strings.append([(70, ypos), text, textcolor, fontsize-2, font])
+			ypos += fontsize
+		if(producer):
+			text = "Producer: " + producer
+			strings.append([(70, ypos), text, textcolor, fontsize-2, font])
+			ypos += fontsize
+
+		self.drawText((width, height), strings).save(file + "2.png")
+
+	def drawText(self, imsize, strings):
+		# Inspired by
+		# http://nedbatchelder.com/blog/200801/truly_transparent_text_with_pil.html
+
+		alpha = Image.new("L", imsize, "black")
+		img = Image.new("RGBA", imsize, (0,0,0,0))
+		
+		for pos, text, color, size, font in strings:
+			imtext = Image.new("L", imsize, 0)
+			draw = ImageDraw.Draw(imtext)
+			font = ImageFont.truetype(font, size, encoding='unic')
+			(offset_x, offset_y) = pos
+			if offset_x < 0:
+				offset_x = imsize[0] - font.getsize(text)[0] + pos[0]
+			if offset_y < 0:
+				pass
+				offset_y = imsize[1] - font.getsize(text)[1] + pos[1]
+
+			draw.text((offset_x, offset_y), text, font=font, fill="white")
+
+			alpha = ImageChops.lighter(alpha, imtext)
+			solidcolor = Image.new("RGBA", imsize, color)
+			immask = Image.eval(imtext, lambda p: 255 * (int(p != 0)))
+			img = Image.composite(solidcolor, img, immask)
+
+		img.putalpha(alpha)
+
+		return img
 	@staticmethod
 	def executeCommand(cmd):
 		process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -302,7 +370,16 @@ class videoConvert(threading.Thread):
 		pubdate = metadata.get('pubDate')
 		dirname = os.path.dirname(options['path'][0]) + "/"
 
+		producer = metadata.get('producer')
+		technician = metadata.get('technician')
+		lecturer = metadata.get('lecturer')
+		year = datetime.datetime.strptime(pubdate, "%Y-%m-%d %H:%M").strftime("%Y")
+
+		if not producer:
+			producer = u"LearningLab DTU / Kasper Skårhøj"
+
 		self.generateIntroOverlay(title, course_id, pubdate, scriptDir+"Konverterede/" + options['path'][1] + '-introOverlay.png')
+		self.generateOutroOverlays(producer, technician , lecturer, year, scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay')
 
 		startOffset = metadata.get('startOffset')
 		endOffset   = metadata.get('endOffset')
@@ -352,7 +429,9 @@ class videoConvert(threading.Thread):
 				brandClips=branding, 
 				videoList=videoList, 
 				fps=fps,
-				introoverlay=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-introOverlay.png')
+				introoverlay=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-introOverlay.png'),
+				outrooverlay1=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay1.png'),
+				outrooverlay2=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay2.png')
 				)
 
 			script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.avs', 'w')
@@ -434,7 +513,8 @@ class videoConvert(threading.Thread):
 		try:
 			log += self.executeCommand("wine avs2pipe audio \"" + avsScript + "\" > \"" + audioFile + "\"")
 			#log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
-			log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
+			#log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
+			log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q 15 --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
 			log += self.executeCommand("yes | ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\"")
 		except Exception:
 			raise
