@@ -18,7 +18,6 @@ introOutro ? Eval("""
 
 	outro = overlayImage(outro, "{outrooverlay1}", 0, 0, 10, 0)
 	outro = overlayImage(outro, "{outrooverlay2}", 65 , 120, 10, 10)
-	intro = FadeOut(intro, 10)
 """) : ""
 
 function overlayImage(clip base, string image, int startframe, int endframe, int fadeStart, int fadeEnd) {{

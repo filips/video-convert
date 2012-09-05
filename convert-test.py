@@ -1,5 +1,20 @@
-#!/usr/bin/python2.6
+# Copyright (c) 2012 Filip Sandborg-Olsen <filipsandborg(at)gmail.com>
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 # -*- coding: utf-8 -*-
+
 import os,re,time,subprocess,pprint,sys
 import simplejson as json
 import shutil
@@ -13,6 +28,7 @@ from termcolor import colored
 import textwrap
 import locale
 import Image, ImageFont, ImageDraw, ImageChops
+import fcntl
 
 ##########################################
 ########### CONSTANTS ####################
@@ -167,7 +183,7 @@ class videoConvert(threading.Thread):
 			if self.queue.__len__() > 0:
 				log("Currently "+str(self.queue.__len__()) + " items queued for conversion.")
 				element = self.queue.popleft()
-
+				youtubeUpload.writeMetadata(element['path'][0], {"conversion": "active"})
 				resolutionError = False
 				for key in element['files']:
 					info = self.videoInfo(element['files'][key])
@@ -177,30 +193,33 @@ class videoConvert(threading.Thread):
 						log("Videofile " + element['files'][key] + " has resolution " + str(width) + "x" + str(height) + " and was quarantined!", 'red')
 						youtubeUpload.writeMetadata(element['path'][0], {"quarantine": "true"})
 						resolutionError = True
-				if resolutionError:
-					continue
+				if not resolutionError:
+					error = False
+					if numStreams == 1:
+						if self.handleConversionJob(element):
 
-				error = False
-				if numStreams == 1:
-					if self.handleConversionJob(element):
+							youtubeUpload.writeMetadata(element['path'][0], {"conversion": False})
 
-						# Adding job to youtubeUpload's queue. Should probably be handled by a watcher thread instead
-						youtubeConfig = element['config'].get("youtube")
-						destination = re.sub(element['rawSuffix'], element['options']['suffix'],element['path'][0])
-						if youtubeConfig and element['config'].get('youtubeUpload') == True:
-							if element.get("preset") == youtubeConfig.get("uploadVersion"):
-								youtubeUpload.addToQueue(destination, youtubeConfig)
-					else:
+							# Adding job to youtubeUpload's queue. Should probably be handled by a watcher thread instead
+							youtubeConfig = element['config'].get("youtube")
+							destination = re.sub(element['rawSuffix'], element['options']['suffix'],element['path'][0])
+							if youtubeConfig and element['config'].get('youtubeUpload') == True:
+								if element.get("preset") == youtubeConfig.get("uploadVersion"):
+									youtubeUpload.addToQueue(destination, youtubeConfig)
+						else:
+							error = True
+							if element['config'].get("contactEmail"):
+								sendErrorReport(element['path'][0], element['config'].get('contactEmail'))
+					elif numStreams == False:
+						log("Couldn't get video information for " + element['path'][0] + " , skipping!")
 						error = True
-						if element['config'].get("contactEmail"):
-							sendErrorReport(element['path'][0], element['config'].get('contactEmail'))
-				elif numStreams == False:
-					log("Couldn't get video information for " + element['path'][0] + " , skipping!")
-					error = True
-				else:
-					log("Video contains " + str(numStreams) + " videostrems, and was quarantined! ("+element['path'][0]+")", 'red')
-					youtubeUpload.writeMetadata(element['path'][0], {"quarantine": "true"})
-					error = True
+					else:
+						log("Video contains " + str(numStreams) + " videostrems, and was quarantined! ("+element['path'][0]+")", 'red')
+						youtubeUpload.writeMetadata(element['path'][0], {"quarantine": "true"})
+						error = True
+
+				if error or resolutionError:
+					youtubeUpload.writeMetadata(element['path'][0], {"conversion": "failed"})
 			time.sleep(0.5)
 		log("Main thread exited, terminating videoConvert...")
 
@@ -513,8 +532,7 @@ class videoConvert(threading.Thread):
 		try:
 			log += self.executeCommand("wine avs2pipe audio \"" + avsScript + "\" > \"" + audioFile + "\"")
 			#log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
-			#log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
-			log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q 15 --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
+			log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
 			log += self.executeCommand("yes | ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\"")
 		except Exception:
 			raise
@@ -615,11 +633,12 @@ class youtubeUpload (threading.Thread):
 		metafile = re.split('-\w+\.\w+$',file)[0] + ".txt"
 		if os.path.isfile(metafile):
 			with open(metafile, 'r') as fp:
+				fcntl.flock(fp, fcntl.LOCK_SH)
 				lines = fp.readlines()
 				fp.close()
 			metadata = {}
 			for line in lines:
-				match = re.search('^\s*([^#^\s]\S+)\s*=\s*([^\[^\s]\S.*\S|\S)\s*$', line)
+				match = re.search('^\s*([^#^\s]\S+)\s*=\s*([^\[^\s]\S.*\S|\S|\S\S)\s*$', line)
 				if match:
 					submatch = re.search('^{(.+)}$', match.group(2))
 					if submatch:
@@ -631,13 +650,31 @@ class youtubeUpload (threading.Thread):
 			return False
 	
 	@staticmethod
-	def writeMetadata(file,data):
+	def writeMetadata(file, data):
 		metafile = re.split('-\w+\.\w+$',file)[0] + ".txt"
 		if os.path.isfile(metafile):
-			f = open(metafile, 'a')
-			for idx in data:
-				f.write("\n" + idx+" = "+data[idx]+"\n")
-			f.close()
+			with open(metafile, 'r') as f:
+				fcntl.flock(f, fcntl.LOCK_SH)
+				lines = f.readlines()
+				for key, line in enumerate(lines):
+					match = re.search('^\s*(' + "|".join(data.keys()) + ')\s*=', line)
+					if match:
+						if data[match.group(1)] == False:
+							lines.pop(key)
+						else:
+							lines[key] = match.group(1) + " = " + str(data[match.group(1)]) + "\n"
+						data.pop(match.group(1))
+					elif line[-1] != '\n':
+						lines[key] = line + '\n'
+				for idx in data:
+					if data[idx] != False:
+						lines.append(idx+" = " + str(data[idx]) + "\n")
+				f.close()
+			with open(metafile, 'w') as f:
+				fcntl.flock(f, fcntl.LOCK_EX)
+				f.writelines(lines)
+				f.close()
+
 	def retrievePlaylists(self):
 		playlist_feed = self.yt_service.GetYouTubePlaylistFeed(username='default')
 		playlists = {}
