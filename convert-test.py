@@ -382,7 +382,7 @@ class videoConvert(threading.Thread):
 	# Write avisynth script
 	def writeAvisynth(self,options):
 		path = self.winPath(options['path'][0])
-		metadata = youtubeUpload.getMetadata(options['path'][0])
+		metadata = youtubeUpload.getMetadata(options['path'][0], unicode=True)
 		if metadata == False:
 			raise metadataException
 		title = metadata.get('title')
@@ -394,13 +394,11 @@ class videoConvert(threading.Thread):
 		technician = metadata.get('technician')
 		lecturer = metadata.get('lecturer')
 		year = datetime.datetime.strptime(pubdate, "%Y-%m-%d %H:%M").strftime("%Y")
-
 		if not producer:
 			producer = u"LearningLab DTU / Kasper Skårhøj"
 
 		self.generateIntroOverlay(title, course_id, pubdate, scriptDir+"Konverterede/" + options['path'][1] + '-introOverlay.png')
 		self.generateOutroOverlays(producer, technician , lecturer, year, scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay')
-
 		startOffset = metadata.get('startOffset')
 		endOffset   = metadata.get('endOffset')
 
@@ -421,7 +419,7 @@ class videoConvert(threading.Thread):
 			outro = defaultOutro
 
 		if title and course_id and pubdate:
-			template = open(scriptDir + "convert/avisynth.avs", 'r').read()
+			template = open(scriptDir + "convert/avisynth.avs", 'r').read().decode('utf-8')
 			videoList = ""
 			for i in range(len(options['files'])):
 
@@ -437,7 +435,6 @@ class videoConvert(threading.Thread):
 				videoList += "addVideoClip(\"" + self.winPath(options['files'][i]) + "\","+str(soff)+","+str(eoff)+")"
 				if i != len(options['files'])-1:
 					videoList += " ++ "
-
 			template = template.format(
 				intro = intro, 
 				video = path, 
@@ -453,9 +450,8 @@ class videoConvert(threading.Thread):
 				outrooverlay1=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay1.png'),
 				outrooverlay2=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay2.png')
 				)
-
 			script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.avs', 'w')
-			script.write(template.decode('utf-8').encode('latin-1'))
+			script.write(template.encode('latin-1', 'ignore'))
 			script.close
 			return template
 		else:
@@ -630,7 +626,7 @@ class youtubeUpload (threading.Thread):
 		return yt_service
 
 	@staticmethod
-	def getMetadata(file):
+	def getMetadata(file, unicode=False):
 		metafile = re.split('-\w+\.\w+$',file)[0] + ".txt"
 		if os.path.isfile(metafile):
 			with open(metafile, 'r') as fp:
@@ -639,6 +635,8 @@ class youtubeUpload (threading.Thread):
 				fp.close()
 			metadata = {}
 			for line in lines:
+				if unicode==True:
+					line = line.decode('utf-8')
 				match = re.search('^\s*([^#^\s]\S+)\s*=\s*([^\[^\s]\S.*\S|\S|\S\S)\s*$', line)
 				if match:
 					submatch = re.search('^{(.+)}$', match.group(2))
