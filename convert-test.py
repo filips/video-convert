@@ -87,6 +87,134 @@ conversionObjs = []
 ########### STANDALONE METHODS ###########
 ##########################################
 
+def scanStructure():
+	_structure = {}
+	_fileList = []
+	log("Scanning " + podcastPath +  " for movie files...")
+	for root, subFolders, files in os.walk(podcastPath):
+		path = root[len(podcastPath):].split('/')
+		lastStructure = _structure
+		for part in path:
+			if part not in lastStructure:
+				lastStructure[part] = {"structure": {}, "config": ""}
+			last = lastStructure[part]
+			lastStructure = lastStructure[part]["structure"]
+		for file in files:
+			if file == "convertConfig.json":
+				configFile = open(os.path.join(root,file),'r').read()
+				try:
+					config = json.loads(configFile)
+				except ValueError:
+					log("Error importing config file in '" + root + "'. Not doing *any* conversion beyond this path.", 'red')
+					last['config'] = False
+				else:
+					last['config'] = config
+			if time.time() - os.stat(os.path.join(root,file)).st_ctime < 10:
+				log("Skipped " + file + ", too new", 'yellow')
+			else:
+				_fileList.append(os.path.join(root,file))
+	return _fileList, _structure
+
+def getRawFiles():
+	rawFiles = {}
+	patterns = {}
+	patterns[rawSuffix] = re.compile("^.+\/([^\/]+)-"+rawSuffix+"(\d)?\.([^\.^-]+)$")
+	for path in fileList:
+		localConfig = getConfig(path)
+		localSuffix = localConfig.get('rawSuffix')
+		if localSuffix:
+			if not patterns.get(localSuffix):
+				patterns[localSuffix] =  re.compile("^.+\/([^\/]+)-"+localSuffix+"(\d)?\.([^\.^-]+)$")
+			parts = patterns[localSuffix].search(path)
+		else:
+			parts = patterns[rawSuffix].search(path)
+		if parts:
+			if not parts.group(1) in rawFiles:
+				rawFiles[parts.group(1)] = {}
+
+			index = parts.group(2)
+			if not index:
+				index = 0
+
+			rawFiles[parts.group(1)][int(index)] = parts.group(0)
+	return rawFiles
+
+def checkFiles():
+	global structure, rawFiles, fileList, conversionQueue, filesAddedYoutube, filesAdded
+
+	#print "Acquiring lock"
+	#conversionQueueLock.acquire()
+	#print "Acquired lock"
+	fileList, structure = scanStructure()
+	rawFiles = getRawFiles()
+
+	pattern = re.compile("^.+\/([^\/]+)-([a-zA-Z0-9]+)\.([^\.^-]+)$")
+	for file in fileList:
+		parts = pattern.search(file)
+		if parts:
+			data = parts.group(0,1,2,3)
+			basename,name,quality,ext = data
+			if ext in fileTypes:
+				localConfig = getConfig(file)
+				localSuffix = localConfig.get('rawSuffix')
+				if not localSuffix:
+					localSuffix = rawSuffix
+				if quality == localSuffix and file not in filesAdded:
+					# filesAdded.append(file)
+					#if not firstLoop:
+					#	log("Found new raw file, " + file, 'green')
+					config = getConfig(file)
+					metadata = youtubeUpload.getMetadata(file)
+					if not metadata:
+						log("Missing metadata for file " + file, 'red')
+						continue
+					if metadata.get('quarantine') == "true":
+						log(file+" is in quarantine!", "red")
+						continue
+
+					# Check if videos are to be uploaded to YouTube
+					if config.get('youtubeUpload') == True and not metadata.get('enotelms:YouTubeUID') and not file in filesAddedYoutube:
+						filesAddedYoutube.append(file)
+						youtube = config.get('youtube');
+						if youtube.get('uploadVersion'):
+							version = youtube.get('uploadVersion')
+						else:
+							version = "720p"
+						config['youtube']['uploadVersion'] = version
+						if versionExists(file, localSuffix, version):
+							username = youtube.get('username')
+							password = youtube.get('password')
+							developer_key = youtube.get('developerKey')
+							playlist = youtube.get('playlist')
+							if username and password and developer_key:
+								filename = file.replace(localSuffix, version)
+								youtubeUpload.addToQueue(filename, youtube.copy())
+					# Check if videos are to be converted
+					if config.get("convert") == True:
+						for format in config.get('formats'):
+							preset = config.get('presets').get(format)
+							if preset:
+								if not versionExists(file, localSuffix, preset.get('suffix')):
+									if not jobQueued(file, preset.get('suffix')):
+										log("Added " + file + " in version " + format + " to queue")
+										conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config, "rawSuffix": localSuffix, "priority": config['presets'][format].get('priority')}
+										conversionQueueLock.acquire()
+										conversionQueue.append(conversionJob)
+										conversionQueueLock.release()
+							else:
+								log("Format '" + format + "' not found. Available ones are (" + ', '.join(format for format in config.get('presets')) + ")")
+					# Generate thumbnails if missing
+					thumbnail = re.sub("-" + localSuffix + "\.(" + "|".join(fileTypes) + ")", "-1.png", file)
+					if not os.path.isfile(thumbnail):
+						info = vidConv.videoInfo(file)
+						try:
+							videoConvert.executeCommand("ffmpeg -ss "+str(info['length']/3)+" -i '"+file+"' -vframes 1 -s 640x360 '"+thumbnail+"'")
+						except executeException:
+							log("Error generating thumbnail: " + thumbnail, 'red')
+						else:
+							log("Generated thumbnail: " + thumbnail , 'green')
+	conversionQueue = sorted(conversionQueue, key=lambda k: k.get('priority'), reverse=True)
+
 def log(string, color="white"):
 	now = datetime.datetime.now()
 	date = "[" + str(now)[:19] + "] "
@@ -129,6 +257,14 @@ def versionExists(file, localSuffix, suffix):
 			return True
 	return False
 
+def jobQueued(file, suffix):
+	for job in conversionQueue:
+		if job['path'][0] == file and job['preset'] == suffix:
+			return True
+	if file in currentlyProcessing():
+		return True
+	return False
+
 # Get the complete config array for a file located at "file"
 def getConfig(file):
 	parts = file[len(podcastPath):].split('/')[:-1]
@@ -169,6 +305,18 @@ def sendErrorReport(filename, email):
 	server.quit()
 	time.sleep(5)
 
+def currentlyProcessing():
+	converting = []
+	for thread in conversionObjs:
+		status = thread.currentlyConverting
+		if status != False:
+			converting.append(status)
+	return converting
+def acquireLock():
+	start = time.time()
+	conversionQueueLock.acquire()
+	print "Acquire time: " + str(time.time() - start)
+
 ##########################################
 ########### CUSTOM EXCEPTIONS ############
 ##########################################
@@ -184,11 +332,28 @@ class executeException(Exception):
 ##########################################
 
 class videoConvert(threading.Thread):
+	currentlyConverting = False
+	def __init__(self):
+		threading.Thread.__init__(self)
 	def run(self):
 		while not mainThreadDone or conversionQueue.__len__() > 0:
 			if conversionQueue.__len__() > 0:
-				log("Currently "+str(conversionQueue.__len__()) + " items queued for conversion.")
-				element = conversionQueue.popleft()
+				checkFiles()
+				#print "Acquiring lock videoConvert"
+				conversionQueueLock.acquire()
+				#acquireLock()
+				#print "Acquired lock videoConvert"
+				if conversionQueue[0]['path'][0] not in currentlyProcessing():
+					element = conversionQueue.pop(0)
+					self.currentlyConverting = element['path'][0]
+					log("Currently "+str(conversionQueue.__len__()) + " items queued for conversion.")
+				else:
+					# Rotate conversion queue
+					conversionQueue.append(conversionQueue.pop(0))
+					conversionQueueLock.release()
+					time.sleep(10)
+					continue
+				conversionQueueLock.release()
 				youtubeUpload.writeMetadata(element['path'][0], {"conversion": "active"})
 				resolutionError = False
 				for key in element['files']:
@@ -226,6 +391,7 @@ class videoConvert(threading.Thread):
 
 				if error or resolutionError:
 					youtubeUpload.writeMetadata(element['path'][0], {"conversion": "failed"})
+			self.currentlyConverting = False
 			time.sleep(0.5)
 		log("Main thread exited, terminating videoConvert...")
 
@@ -748,121 +914,22 @@ if isRunning():
 log("Convert script launched")
 log("Launching youtube processing thread..")
 
-conversionQueue = deque()
+conversionQueueLock = threading.Lock()
+conversionQueue = []
+filesAdded = []
+filesAddedYoutube = []
 
 youtube = youtubeUpload()
 log("Launching "+str(conversionThreads)+" video processing threads..")
 
 for i in range(conversionThreads):
-	vidConv = videoConvert()
-	vidConv.start()
-	conversionObjs.append(vidConv)
+ 	vidConv = videoConvert()
+ 	vidConv.start()
+ 	conversionObjs.append(vidConv)
 
 youtube.start()
 
-log("Scanning " + podcastPath +  " for movie files...")
-for root, subFolders, files in os.walk(podcastPath):
-	path = root[len(podcastPath):].split('/')
-	lastStructure = structure
-	for part in path:
-		if part not in lastStructure:
-			lastStructure[part] = {"structure": {}, "config": ""}
-		last = lastStructure[part]
-		lastStructure = lastStructure[part]["structure"]
-	for file in files:
-		if file == "convertConfig.json":
-			configFile = open(os.path.join(root,file),'r').read()
-			try:
-				config = json.loads(configFile)
-			except ValueError:
-				log("Error importing config file in '" + root + "'. Not doing *any* conversion beyond this path.", 'red')
-				last['config'] = False
-			else:
-				last['config'] = config
-		if time.time() - os.stat(os.path.join(root,file)).st_ctime < 10:
-			log("Skipped " + file + ", too new", 'yellow')
-		else:
-			fileList.append(os.path.join(root,file))
-
-rawFiles = {}
-patterns = {}
-patterns[rawSuffix] = re.compile("^.+\/([^\/]+)-"+rawSuffix+"(\d)?\.([^\.^-]+)$")
-for path in fileList:
-	localConfig = getConfig(path)
-	localSuffix = localConfig.get('rawSuffix')
-	if localSuffix:
-		if not patterns.get(localSuffix):
-			patterns[localSuffix] =  re.compile("^.+\/([^\/]+)-"+localSuffix+"(\d)?\.([^\.^-]+)$")
-		parts = patterns[localSuffix].search(path)
-	else:
-		parts = patterns[rawSuffix].search(path)
-	if parts:
-		if not parts.group(1) in rawFiles:
-			rawFiles[parts.group(1)] = {}
-
-		index = parts.group(2)
-		if not index:
-			index = 0
-
-		rawFiles[parts.group(1)][int(index)] = parts.group(0)
-
-pattern = re.compile("^.+\/([^\/]+)-([a-zA-Z0-9]+)\.([^\.^-]+)$")
-for file in fileList:
-	parts = pattern.search(file)
-	if parts:
-		data = parts.group(0,1,2,3)
-		basename,name,quality,ext = data
-		if ext in fileTypes:
-			localConfig = getConfig(file)
-			localSuffix = localConfig.get('rawSuffix')
-			if not localSuffix:
-				localSuffix = rawSuffix
-			if quality == localSuffix:
-				config = getConfig(file)
-				metadata = youtubeUpload.getMetadata(file)
-				if not metadata:
-					log("Missing metadata for file " + file, 'red')
-					continue
-				if metadata.get('quarantine') == "true":
-					log(file+" is in quarantine!", "red")
-					continue
-
-				# Check if videos are to be uploaded to YouTube
-				if config.get('youtubeUpload') == True and not metadata.get('enotelms:YouTubeUID'):
-					youtube = config.get('youtube');
-					if youtube.get('uploadVersion'):
-						version = youtube.get('uploadVersion')
-					else:
-						version = "720p"
-					config['youtube']['uploadVersion'] = version
-					if versionExists(file, localSuffix, version):
-						username = youtube.get('username')
-						password = youtube.get('password')
-						developer_key = youtube.get('developerKey')
-						playlist = youtube.get('playlist')
-						if username and password and developer_key:
-							filename = file.replace(localSuffix, version)
-							youtubeUpload.addToQueue(filename, youtube.copy())
-				# Check if videos are to be converted
-				if config.get("convert") == True:
-					for format in config.get('formats'):
-						preset = config.get('presets').get(format)
-						if preset:
-
-							if not versionExists(file, localSuffix, preset.get('suffix')):
-								conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config, "rawSuffix": localSuffix}
-								conversionQueue.append(conversionJob)
-						else:
-							log("Format '" + format + "' not found. Available ones are (" + ', '.join(format for format in config.get('presets')) + ")")
-				# Generate thumbnails if missing
-				thumbnail = re.sub("-" + localSuffix + "\.(" + "|".join(fileTypes) + ")", "-1.png", file)
-				if not os.path.isfile(thumbnail):
-					info = vidConv.videoInfo(file)
-					try:
-						videoConvert.executeCommand("ffmpeg -ss "+str(info['length']/3)+" -i '"+file+"' -vframes 1 -s 640x360 '"+thumbnail+"'")
-					except executeException:
-						log("Error generating thumbnail: " + thumbnail, 'red')
-					else:
-						log("Generated thumbnail: " + thumbnail , 'green')
+# Initial population of conversionQueue
+checkFiles()
 
 mainThreadDone = True	
