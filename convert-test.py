@@ -53,6 +53,9 @@ rawSuffix = "raw" # Used to be 720p
 CPUS = 4
 NICENESS = 15
 
+# Number of simultaneous conversion threads
+conversionThreads = 2
+
 # List of possible video file types
 fileTypes = ["mp4", "m4v", "mov"]
 
@@ -69,13 +72,16 @@ wineDrive = "z"
 # Video framerate. Should be configurable on a per-channel basis
 fps = 25 
 
+# Locale primarily used in date formats. Should be customized in metadata
+locale.setlocale(locale.LC_ALL, "da_DK.UTF-8")
+
+## INTERNAL ##
+
 # Don't change
 logging = True
 pendingLog = []
 mainThreadDone = False
-
-# Locale primarily used in date formats. Should be customized in metadata
-locale.setlocale(locale.LC_ALL, "da_DK.UTF-8")
+conversionObjs = []
 
 ##########################################
 ########### STANDALONE METHODS ###########
@@ -178,12 +184,11 @@ class executeException(Exception):
 ##########################################
 
 class videoConvert(threading.Thread):
-	queue = deque()
 	def run(self):
-		while not mainThreadDone or self.queue.__len__() > 0:
-			if self.queue.__len__() > 0:
-				log("Currently "+str(self.queue.__len__()) + " items queued for conversion.")
-				element = self.queue.popleft()
+		while not mainThreadDone or conversionQueue.__len__() > 0:
+			if conversionQueue.__len__() > 0:
+				log("Currently "+str(conversionQueue.__len__()) + " items queued for conversion.")
+				element = conversionQueue.popleft()
 				youtubeUpload.writeMetadata(element['path'][0], {"conversion": "active"})
 				resolutionError = False
 				for key in element['files']:
@@ -332,7 +337,9 @@ class videoConvert(threading.Thread):
 
 		return img
 	@staticmethod
-	def executeCommand(cmd):
+	def executeCommand(cmd,niceness=False):
+		if niceness:
+			cmd = 'nice -n '+str(NICENESS)+' sh -c "' + cmd.replace('"','\'') + '"'
 		process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 		#stdout, stderr = process.communicate()
 		stdout = ''
@@ -527,10 +534,10 @@ class videoConvert(threading.Thread):
 		self.writeAvisynth(job)
 		log = ""
 		try:
-			log += self.executeCommand("wine avs2pipe audio \"" + avsScript + "\" > \"" + audioFile + "\"")
+			log += self.executeCommand("wine avs2pipe audio \"" + avsScript + "\" > \"" + audioFile + "\"", niceness=True)
 			#log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
-			log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
-			log += self.executeCommand("yes | ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\"")
+			log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -", niceness=True)
+			log += self.executeCommand("yes | ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\"", niceness=True)
 		except Exception:
 			raise
 		finally:
@@ -544,8 +551,8 @@ class videoConvert(threading.Thread):
 	def handbrakeConversion(self, job):
 		options = job['options']
 		handBrakeArgs = "-e x264 -q " + str(options['quality']) + " -B " + str(options['audiobitrate']) + " -w " + str(options['width']) + " -l " + str(options['height'])	
-		cmd = "nice -n " + str(NICENESS) + " " + HandBrakeCLI + " --cpu " + str(CPUS) + " " + handBrakeArgs + " -r "+str(fps)+" -i '" + job['path'][0] + "' -o '" + job['outputFile'] + ".mp4'"
-		return self.executeCommand(cmd)
+		cmd = HandBrakeCLI + " --cpu " + str(CPUS) + " " + handBrakeArgs + " -r "+str(fps)+" -i '" + job['path'][0] + "' -o '" + job['outputFile'] + ".mp4'"
+		return self.executeCommand(cmd, niceness=True)
 
 
 ##########################################
@@ -741,12 +748,17 @@ if isRunning():
 log("Convert script launched")
 log("Launching youtube processing thread..")
 
+conversionQueue = deque()
+
 youtube = youtubeUpload()
-log("Launching video processing thread..")
-vidConv = videoConvert()
+log("Launching "+str(conversionThreads)+" video processing threads..")
+
+for i in range(conversionThreads):
+	vidConv = videoConvert()
+	vidConv.start()
+	conversionObjs.append(vidConv)
 
 youtube.start()
-vidConv.start()
 
 log("Scanning " + podcastPath +  " for movie files...")
 for root, subFolders, files in os.walk(podcastPath):
@@ -839,7 +851,7 @@ for file in fileList:
 
 							if not versionExists(file, localSuffix, preset.get('suffix')):
 								conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config, "rawSuffix": localSuffix}
-								videoConvert.queue.append(conversionJob)
+								conversionQueue.append(conversionJob)
 						else:
 							log("Format '" + format + "' not found. Available ones are (" + ', '.join(format for format in config.get('presets')) + ")")
 				# Generate thumbnails if missing
