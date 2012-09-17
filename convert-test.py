@@ -60,7 +60,8 @@ conversionThreads = 2
 fileTypes = ["mp4", "m4v", "mov"]
 
 
-logFile = open(scriptDir + "convert.log", 'a')
+fullLog = open(scriptDir + "full.log", 'a')
+infoLog = open(scriptDir + "info.log", 'a')
 
 fileList = []
 structure = {}
@@ -220,11 +221,16 @@ def log(string, color="white"):
 	date = "[" + str(now)[:19] + "] "
 	message = str(string)
 	logstr = date + message
+	logstr = colored(date, 'cyan') + colored(message, color)
 	if logging:
-		pendingLog.append(logstr)
+		pendingLog.append({"message": logstr, "color": color})
 		while len(pendingLog) > 0:
-			logFile.write(pendingLog.pop(0) + "\n")
-			logFile.flush()
+			nextEntry = pendingLog.pop(0)
+			if nextEntry['color'] in ["green", "white"]:
+				infoLog.write(nextEntry['message'] + "\n")
+				infoLog.flush()
+			fullLog.write(nextEntry['message'] + "\n")
+			fullLog.flush()
 	else:
 		pendingLog.append(logstr)
 	print colored(date, 'cyan'), colored(message, color)
@@ -248,6 +254,12 @@ def isRunning():
 		fp.close()
 		return False
 
+def anyVersionExists(file, rawSuffix):
+	basename = re.split('-\w+\.\w+$',file)[0]
+	for file in fileList:
+		if re.match(basename + "-(^(!?"+rawSuffix+")\w+)\.("+"|".join(fileTypes)+")", file):
+			return True
+	return False
 def versionExists(file, localSuffix, suffix):
 	for filetype in fileTypes:
 		filename = re.sub(localSuffix+".+$",suffix, file) + "." + filetype
@@ -336,36 +348,36 @@ class videoConvert(threading.Thread):
 	def __init__(self):
 		threading.Thread.__init__(self)
 	def run(self):
-		while not mainThreadDone or conversionQueue.__len__() > 0:
+		while not mainThreadDone or conversionQueue.__len__() > 0 or len(currentlyProcessing()) > 0:
+			checkFiles()
 			if conversionQueue.__len__() > 0:
-				checkFiles()
-				#print "Acquiring lock videoConvert"
-				conversionQueueLock.acquire()
-				#acquireLock()
-				#print "Acquired lock videoConvert"
-				if conversionQueue[0]['path'][0] not in currentlyProcessing():
-					element = conversionQueue.pop(0)
-					self.currentlyConverting = element['path'][0]
-					log("Currently "+str(conversionQueue.__len__()) + " items queued for conversion.")
-				else:
-					# Rotate conversion queue
-					conversionQueue.append(conversionQueue.pop(0))
-					conversionQueueLock.release()
-					time.sleep(10)
-					continue
-				conversionQueueLock.release()
+				error = False
+				with conversionQueueLock:
+					if conversionQueue[0]['path'][0] not in currentlyProcessing() and not (anyVersionExists(conversionQueue[0]['path'][0], conversionQueue[0]['rawSuffix']) and len(currentlyProcessing()) > 0):
+						log("Currently "+str(conversionQueue.__len__()) + " items queued for conversion.")
+						element = conversionQueue.pop(0)
+						self.currentlyConverting = element['path'][0]
+					else:
+						# Rotate conversion queue
+						print "Waiting..."
+						conversionQueue.append(conversionQueue.pop(0))
+						time.sleep(2)
+						continue
 				youtubeUpload.writeMetadata(element['path'][0], {"conversion": "active"})
 				resolutionError = False
 				for key in element['files']:
 					info = self.videoInfo(element['files'][key])
+					if not info:
+						error = True
+						log("Error getting video info for " + element['files'][key], "red")
+						break
 					numStreams = info['videoStreams']
 					width, height = info['width'], info['height']
 					if (width, height) != (1280, 720):
 						log("Videofile " + element['files'][key] + " has resolution " + str(width) + "x" + str(height) + " and was quarantined!", 'red')
 						youtubeUpload.writeMetadata(element['path'][0], {"quarantine": "true"})
 						resolutionError = True
-				if not resolutionError:
-					error = False
+				if not resolutionError and not error:
 					if numStreams == 1:
 						if self.handleConversionJob(element):
 
@@ -506,7 +518,7 @@ class videoConvert(threading.Thread):
 	def executeCommand(cmd,niceness=False):
 		if niceness:
 			cmd = 'nice -n '+str(NICENESS)+' sh -c "' + cmd.replace('"','\'') + '"'
-		process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+		process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 		#stdout, stderr = process.communicate()
 		stdout = ''
 		while True:
@@ -544,7 +556,7 @@ class videoConvert(threading.Thread):
 			}
 		except executeException:
 			return False
-		except ValueError:
+		except ValueError as e:
 			return False
 		else:
 			return videoinfo
@@ -728,7 +740,7 @@ class videoConvert(threading.Thread):
 class youtubeUpload (threading.Thread):
 	queue = deque()
 	def run(self):
-		while not (mainThreadDone and not vidConv.isAlive()) or self.queue.__len__() > 0:
+		while not (mainThreadDone and not conversionObjs[0].isAlive()) or self.queue.__len__() > 0:
 			if self.queue.__len__() > 0:
 				element = self.queue.popleft()
 				metadata = self.getMetadata(element['filename'])
