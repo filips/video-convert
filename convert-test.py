@@ -51,10 +51,10 @@ defaultOutro = "z:\\home\\typothree\\VideoParts\\outro.mov"
 rawSuffix = "raw" # Used to be 720p
 
 CPUS = 4
-NICENESS = 15
+NICENESS = 19
 
 # Number of simultaneous conversion threads
-conversionThreads = 2
+conversionThreads = 1
 
 # List of possible video file types
 fileTypes = ["mp4", "m4v", "mov"]
@@ -73,6 +73,9 @@ wineDrive = "z"
 # Video framerate. Should be configurable on a per-channel basis
 fps = 25 
 
+# Minimum interval between folder scans
+scanInterval = 60
+
 # Locale primarily used in date formats. Should be customized in metadata
 locale.setlocale(locale.LC_ALL, "da_DK.UTF-8")
 
@@ -83,6 +86,7 @@ logging = True
 pendingLog = []
 mainThreadDone = False
 conversionObjs = []
+lastScanned = 0
 
 ##########################################
 ########### STANDALONE METHODS ###########
@@ -140,12 +144,13 @@ def getRawFiles():
 			rawFiles[parts.group(1)][int(index)] = parts.group(0)
 	return rawFiles
 
-def checkFiles():
-	global structure, rawFiles, fileList, conversionQueue, filesAddedYoutube, filesAdded
+def checkFiles(force=False):
+	global structure, rawFiles, fileList, conversionQueue, filesAddedYoutube, filesAdded, lastScanned,conversionObjs
 
-	#print "Acquiring lock"
-	#conversionQueueLock.acquire()
-	#print "Acquired lock"
+	if time.time() - lastScanned < scanInterval and not force:
+		return
+	lastScanned = time.time()
+
 	fileList, structure = scanStructure()
 	rawFiles = getRawFiles()
 
@@ -196,18 +201,17 @@ def checkFiles():
 							preset = config.get('presets').get(format)
 							if preset:
 								if not versionExists(file, localSuffix, preset.get('suffix')):
-									if not jobQueued(file, preset.get('suffix')):
-										log("Added " + file + " in version " + format + " to queue")
-										conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config, "rawSuffix": localSuffix, "priority": config['presets'][format].get('priority')}
-										conversionQueueLock.acquire()
-										conversionQueue.append(conversionJob)
-										conversionQueueLock.release()
+									with conversionQueueLock:
+										if not jobQueued(file, preset.get('suffix')):
+											log("Added " + file + " in version " + format + " to queue")
+											conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config, "rawSuffix": localSuffix, "priority": config['presets'][format].get('priority')}
+											conversionQueue.append(conversionJob)
 							else:
 								log("Format '" + format + "' not found. Available ones are (" + ', '.join(format for format in config.get('presets')) + ")")
 					# Generate thumbnails if missing
 					thumbnail = re.sub("-" + localSuffix + "\.(" + "|".join(fileTypes) + ")", "-1.png", file)
 					if not os.path.isfile(thumbnail):
-						info = vidConv.videoInfo(file)
+						info = videoConvert.videoInfo(file)
 						try:
 							videoConvert.executeCommand("ffmpeg -ss "+str(info['length']/3)+" -i '"+file+"' -vframes 1 -s 640x360 '"+thumbnail+"'")
 						except executeException:
@@ -256,9 +260,12 @@ def isRunning():
 
 def anyVersionExists(file, rawSuffix):
 	basename = re.split('-\w+\.\w+$',file)[0]
-	for file in fileList:
-		if re.match(basename + "-(^(!?"+rawSuffix+")\w+)\.("+"|".join(fileTypes)+")", file):
+	for fileName in fileList:
+		# Temporary workaround for faulty regex.
+		if fileName[:len(basename)] == basename and fileName[len(basename)+1:-4] != rawSuffix and fileName[-3:] in fileTypes:
 			return True
+		#if re.match(basename + "-(^(!?"+rawSuffix+")\w+)\.("+"|".join(fileTypes)+")", fileName):
+		#	return True
 	return False
 def versionExists(file, localSuffix, suffix):
 	for filetype in fileTypes:
@@ -348,18 +355,20 @@ class videoConvert(threading.Thread):
 	def __init__(self):
 		threading.Thread.__init__(self)
 	def run(self):
+		global lastScanned
 		while not mainThreadDone or conversionQueue.__len__() > 0 or len(currentlyProcessing()) > 0:
 			checkFiles()
 			if conversionQueue.__len__() > 0:
 				error = False
 				with conversionQueueLock:
+					if anyVersionExists(conversionQueue[0]['path'][0], conversionQueue[0]['rawSuffix']):
+						print "TIS"
 					if conversionQueue[0]['path'][0] not in currentlyProcessing() and not (anyVersionExists(conversionQueue[0]['path'][0], conversionQueue[0]['rawSuffix']) and len(currentlyProcessing()) > 0):
 						log("Currently "+str(conversionQueue.__len__()) + " items queued for conversion.")
 						element = conversionQueue.pop(0)
 						self.currentlyConverting = element['path'][0]
 					else:
 						# Rotate conversion queue
-						print "Waiting..."
 						conversionQueue.append(conversionQueue.pop(0))
 						time.sleep(2)
 						continue
@@ -515,10 +524,13 @@ class videoConvert(threading.Thread):
 
 		return img
 	@staticmethod
-	def executeCommand(cmd,niceness=False):
+	def executeCommand(cmd,niceness=False, includeStderr=False):
 		if niceness:
 			cmd = 'nice -n '+str(NICENESS)+' sh -c "' + cmd.replace('"','\'') + '"'
-		process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		if includeStderr:
+			process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+		else:
+			process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=None)
 		#stdout, stderr = process.communicate()
 		stdout = ''
 		while True:
@@ -536,10 +548,11 @@ class videoConvert(threading.Thread):
 		return stdout
 
 	# Routine to get basic information about a video file
-	def videoInfo(self, file):
+	@staticmethod
+	def videoInfo(file):
 		try:
-			numStreams = int(self.executeCommand("ffprobe \""+file+"\" 2>&1 | awk '/Stream .+ Video/{print $0}' | wc -l"))
-			metaData = self.executeCommand("exiftool \""+file+"\"")
+			numStreams = int(videoConvert.executeCommand("ffprobe \""+file+"\" 2>&1 | awk '/Stream .+ Video/{print $0}' | wc -l"))
+			metaData = videoConvert.executeCommand("exiftool \""+file+"\"")
 			info = {}
 			for line in metaData.splitlines():
 				key, value = [x.strip() for x in line.split(" : ")]
@@ -712,10 +725,10 @@ class videoConvert(threading.Thread):
 		self.writeAvisynth(job)
 		log = ""
 		try:
-			log += self.executeCommand("wine avs2pipe audio \"" + avsScript + "\" > \"" + audioFile + "\"", niceness=True)
+			log += self.executeCommand("wine avs2pipe audio \"" + avsScript + "\" > \"" + audioFile + "\"", niceness=True, includeStderr=True)
 			#log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
-			log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -", niceness=True)
-			log += self.executeCommand("yes | ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\"", niceness=True)
+			log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -", niceness=True, includeStderr=True)
+			log += self.executeCommand("yes | ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\"", niceness=True, includeStderr=True)
 		except Exception:
 			raise
 		finally:
@@ -730,7 +743,7 @@ class videoConvert(threading.Thread):
 		options = job['options']
 		handBrakeArgs = "-e x264 -q " + str(options['quality']) + " -B " + str(options['audiobitrate']) + " -w " + str(options['width']) + " -l " + str(options['height'])	
 		cmd = HandBrakeCLI + " --cpu " + str(CPUS) + " " + handBrakeArgs + " -r "+str(fps)+" -i '" + job['path'][0] + "' -o '" + job['outputFile'] + ".mp4'"
-		return self.executeCommand(cmd, niceness=True)
+		return self.executeCommand(cmd, niceness=True, includeStderr=True)
 
 
 ##########################################
@@ -927,6 +940,7 @@ log("Convert script launched")
 log("Launching youtube processing thread..")
 
 conversionQueueLock = threading.Lock()
+
 conversionQueue = []
 filesAdded = []
 filesAddedYoutube = []
@@ -934,14 +948,14 @@ filesAddedYoutube = []
 youtube = youtubeUpload()
 log("Launching "+str(conversionThreads)+" video processing threads..")
 
+# Initial population of conversionQueue
+checkFiles()
+
 for i in range(conversionThreads):
  	vidConv = videoConvert()
  	vidConv.start()
  	conversionObjs.append(vidConv)
 
 youtube.start()
-
-# Initial population of conversionQueue
-checkFiles()
 
 mainThreadDone = True	
