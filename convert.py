@@ -85,6 +85,7 @@ locale.setlocale(locale.LC_ALL, "da_DK.UTF-8")
 logging = True
 pendingLog = []
 mainThreadDone = False
+convertObjLock = threading.Lock()
 conversionObjs = []
 lastScanned = 0
 
@@ -119,6 +120,21 @@ def scanStructure():
 			else:
 				_fileList.append(os.path.join(root,file))
 	return _fileList, _structure
+
+def addToQueue(job):
+	index = 0
+	for key, element in enumerate(conversionQueue):
+		index = key + 1
+		if job['priority'] >= element['priority']:
+			if job['pubDate'] < element['pubDate']:
+				index -= 1
+	 			break
+	conversionQueue.insert(index, job)
+
+def printQueue():
+	log("### CURRENT QUEUE ###", 'green')
+	for key, el in enumerate(conversionQueue):
+		log(str(key+1) + "\t" + el['preset'] + "\t" + el['metadata']['pubDate'] + "\t" + el['path'][0], 'green')
 
 def getRawFiles():
 	rawFiles = {}
@@ -204,8 +220,9 @@ def checkFiles(force=False):
 									with conversionQueueLock:
 										if not jobQueued(file, preset.get('suffix')):
 											log("Added " + file + " in version " + format + " to queue")
-											conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config, "rawSuffix": localSuffix, "priority": config['presets'][format].get('priority')}
-											conversionQueue.append(conversionJob)
+											conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config, "rawSuffix": localSuffix, "priority": config['presets'][format].get('priority'), "metadata": metadata, "pubDate": datetime.datetime.strptime(metadata.get('pubDate'), "%Y-%m-%d %H:%M").strftime("%s")}
+											addToQueue(conversionJob)
+											#conversionQueue.append(conversionJob)
 							else:
 								log("Format '" + format + "' not found. Available ones are (" + ', '.join(format for format in config.get('presets')) + ")")
 					# Generate thumbnails if missing
@@ -218,7 +235,7 @@ def checkFiles(force=False):
 							log("Error generating thumbnail: " + thumbnail, 'red')
 						else:
 							log("Generated thumbnail: " + thumbnail , 'green')
-	conversionQueue = sorted(conversionQueue, key=lambda k: k.get('priority'), reverse=True)
+	#conversionQueue = sorted(conversionQueue, key=lambda k: k.get('priority'), reverse=True)
 
 def log(string, color="white"):
 	now = datetime.datetime.now()
@@ -355,72 +372,56 @@ class executeException(Exception):
 
 class videoConvert(threading.Thread):
 	currentlyConverting = False
-	def __init__(self):
+	def __init__(self, conversionJob):
 		threading.Thread.__init__(self)
+		self.job = conversionJob
+		self.currentlyConverting = self.job['path'][0]
 	def run(self):
-		global lastScanned
-		while not mainThreadDone or conversionQueue.__len__() > 0 or len(currentlyProcessing()) > 0:
-			checkFiles()
-			if conversionQueue.__len__() > 0:
-				error = False
-				with conversionQueueLock:
-					if conversionQueue.__len__() > 0:
-						if conversionQueue[0]['path'][0] not in currentlyProcessing() and not (anyVersionExists(conversionQueue[0]['path'][0], conversionQueue[0]['rawSuffix']) and len(currentlyProcessing()) > 0):
-							log("Currently "+str(conversionQueue.__len__()) + " items queued for conversion.")
-							element = conversionQueue.pop(0)
-							self.currentlyConverting = element['path'][0]
-						else:
-							# Rotate conversion queue
-							conversionQueue.append(conversionQueue.pop(0))
-							time.sleep(2)
-							continue
-					else:
-						time.sleep(1)
-						continue
-				youtubeUpload.writeMetadata(element['path'][0], {"conversion": "active"})
-				resolutionError = False
-				for key in element['files']:
-					info = self.videoInfo(element['files'][key])
-					if not info:
-						error = True
-						log("Error getting video info for " + element['files'][key], "red")
-						break
-					element['duration'] = info['length']
-					numStreams = info['videoStreams']
-					width, height = info['width'], info['height']
-					if (width, height) != (1280, 720):
-						log("Videofile " + element['files'][key] + " has resolution " + str(width) + "x" + str(height) + " and was quarantined!", 'red')
-						youtubeUpload.writeMetadata(element['path'][0], {"quarantine": "true"})
-						resolutionError = True
-				if not resolutionError and not error:
-					if numStreams == 1:
-						if self.handleConversionJob(element):
+		error = False
+		youtubeUpload.writeMetadata(self.job['path'][0], {"conversion": "active"})
+		resolutionError = False
+		for key in self.job['files']:
+			info = self.videoInfo(element['files'][key])
+			if not info:
+				error = True
+				log("Error getting video info for " + self.job['files'][key], "red")
+				break
+			self.job['duration'] = info['length']
+			numStreams = info['videoStreams']
+			width, height = info['width'], info['height']
+			if (width, height) != (1280, 720):
+				log("Videofile " + self.job['files'][key] + " has resolution " + str(width) + "x" + str(height) + " and was quarantined!", 'red')
+				youtubeUpload.writeMetadata(self.job['path'][0], {"quarantine": "true"})
+				resolutionError = True
+		if not resolutionError and not error:
+			if numStreams == 1:
+				if self.handleConversionJob(self.job):
 
-							youtubeUpload.writeMetadata(element['path'][0], {"conversion": False})
+					youtubeUpload.writeMetadata(element['path'][0], {"conversion": False})
 
-							# Adding job to youtubeUpload's queue. Should probably be handled by a watcher thread instead
-							youtubeConfig = element['config'].get("youtube")
-							destination = re.sub(element['rawSuffix'], element['options']['suffix'],element['path'][0])
-							if youtubeConfig and element['config'].get('youtubeUpload') == True:
-								if element.get("preset") == youtubeConfig.get("uploadVersion"):
-									youtubeUpload.addToQueue(destination, youtubeConfig)
-						else:
-							error = True
-							if element['config'].get("contactEmail"):
-								sendErrorReport(element['path'][0], element['config'].get('contactEmail'))
-					elif numStreams == False:
-						log("Couldn't get video information for " + element['path'][0] + " , skipping!")
-						error = True
-					else:
-						log("Video contains " + str(numStreams) + " videostrems, and was quarantined! ("+element['path'][0]+")", 'red')
-						youtubeUpload.writeMetadata(element['path'][0], {"quarantine": "true"})
-						error = True
+					# Adding job to youtubeUpload's queue. Should probably be handled by a watcher thread instead
+					youtubeConfig = self.job['config'].get("youtube")
+					destination = re.sub(self.job['rawSuffix'], self.job['options']['suffix'],self.job['path'][0])
+					if youtubeConfig and self.job['config'].get('youtubeUpload') == True:
+						if self.job.get("preset") == youtubeConfig.get("uploadVersion"):
+							youtubeUpload.addToQueue(destination, youtubeConfig)
+				else:
+					error = True
+					if self.job['config'].get("contactEmail"):
+						sendErrorReport(self.job['path'][0], self.job['config'].get('contactEmail'))
+			elif numStreams == False:
+				log("Couldn't get video information for " + self.job['path'][0] + " , skipping!")
+				error = True
+			else:
+				log("Video contains " + str(numStreams) + " videostrems, and was quarantined! ("+self.job['path'][0]+")", 'red')
+				youtubeUpload.writeMetadata(self.job['path'][0], {"quarantine": "true"})
+				error = True
 
-				if error or resolutionError:
-					youtubeUpload.writeMetadata(element['path'][0], {"conversion": "failed"})
-			self.currentlyConverting = False
-			time.sleep(0.5)
-		log("Main thread exited, terminating videoConvert...")
+		if error or resolutionError:
+			youtubeUpload.writeMetadata(self.job['path'][0], {"conversion": "failed"})
+		self.currentlyConverting = False
+		with conversionQueueLock:
+			conversionQueue.remove(self)
 
 	def generateIntroOverlay(self, title, course, date,file):
 		import Image, ImageDraw, ImageFont
@@ -990,16 +991,29 @@ filesAdded = []
 filesAddedYoutube = []
 
 youtube = youtubeUpload()
-log("Launching "+str(conversionThreads)+" video processing threads..")
-
-# Initial population of conversionQueue
-checkFiles()
-
-for i in range(conversionThreads):
- 	vidConv = videoConvert()
- 	vidConv.start()
- 	conversionObjs.append(vidConv)
-
 youtube.start()
+
+checkFiles()
+lastCount = 0
+while 1:
+	if conversionObjs.__len__() != lastCount:
+		checkFiles(force=True)
+	if conversionObjs.__len__() == 0 and conversionQueue.__len__() == 0:
+		log("No more work to do - exiting main loop")
+		break
+	if conversionObjs.__len__() != conversionThreads and conversionQueue.__len__() > 0:
+		with convertObjLock:
+			with conversionQueueLock:
+				if conversionQueue[0]['path'][0] not in currentlyProcessing() and not (anyVersionExists(conversionQueue[0]['path'][0], conversionQueue[0]['rawSuffix']) and conversionObjs.__len__() > 0):
+					log("Currently "+str(conversionQueue.__len__()) + " items queued for conversion.")
+					printQueue()
+					element = conversionQueue.pop(0)
+
+					log("Created videoConvert object.")
+					vidConv = videoConvert(element)
+					conversionObjs.append(vidConv)
+					vidConv.start()
+	lastCount = conversionObjs.__len__()
+	time.sleep(1)
 
 mainThreadDone = True	
