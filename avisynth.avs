@@ -75,8 +75,8 @@ function overlayImage(clip base, string image, int startframe, int endframe, int
 }}
 
 function brandClip(clip c) {{
-	logo = ImageSource("z:\home\typothree\VideoParts\logo.png")
-	logomask = ImageSource("z:\home\typothree\VideoParts\logo.png",pixel_type="RGB32").ShowAlpha(pixel_type="RGB32")
+	logo = ImageSource("z:\home\video-convert\dtulogo.png")
+	logomask = ImageSource("z:\home\video-convert\dtulogo.png",pixel_type="RGB32").ShowAlpha(pixel_type="RGB32")
 	Overlay(c, logo, 1160, 40, mask=logomask)
 }}
 

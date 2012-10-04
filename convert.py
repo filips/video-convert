@@ -36,8 +36,8 @@ import fcntl
 ##########################################
 
 #NO trailing slash on podcastPath!!
-podcastPath = "/home/typothree/podcasts"
-scriptDir = "/home/videoconvert/video-convert/"
+podcastPath = "/home/video-convert/podcasts"
+scriptDir = "/home/video-convert/"
 HandBrakeCLI = "/home/typothree/prefix/bin/HandBrakeCLI"
 
 # YouTube parameters to be passed if metadata is missing
@@ -45,16 +45,16 @@ defaultYoutubeCategory = "Education"
 defaultYoutubeKeywords = "Education"
 
 # Default intro and outro video in case branding is specified, but no custom files are found
-defaultIntro = "z:\\home\\typothree\\VideoParts\\intro.mov"
-defaultOutro = "z:\\home\\typothree\\VideoParts\\outro.mov"
+defaultIntro = "z:\\home\\video-convert\\intro.mov"
+defaultOutro = "z:\\home\\video-convert\\outro.mov"
 
 rawSuffix = "raw" # Used to be 720p
 
 CPUS = 4
-NICENESS = 19
+NICENESS = 15
 
 # Number of simultaneous conversion threads
-conversionThreads = 1
+conversionThreads = 2
 
 # List of possible video file types
 fileTypes = ["mp4", "m4v", "mov"]
@@ -228,13 +228,16 @@ def log(string, color="white"):
 	logstr = colored(date, 'cyan') + colored(message, color)
 	if logging:
 		pendingLog.append({"message": logstr, "color": color})
-		while len(pendingLog) > 0:
-			nextEntry = pendingLog.pop(0)
-			if nextEntry['color'] in ["green", "white"]:
-				infoLog.write(nextEntry['message'] + "\n")
-				infoLog.flush()
-			fullLog.write(nextEntry['message'] + "\n")
-			fullLog.flush()
+		try:
+			while True:
+				nextEntry = pendingLog.pop(0)
+				if nextEntry['color'] in ["green", "white"]:
+					infoLog.write(nextEntry['message'] + "\n")
+					infoLog.flush()
+				fullLog.write(nextEntry['message'] + "\n")
+				fullLog.flush()
+		except IndexError:
+			pass
 	else:
 		pendingLog.append(logstr)
 	print colored(date, 'cyan'), colored(message, color)
@@ -278,7 +281,7 @@ def versionExists(file, localSuffix, suffix):
 
 def jobQueued(file, suffix):
 	for job in conversionQueue:
-		if job['path'][0] == file and job['preset'] == suffix:
+		if job['path'][0] == file and job['options'].get('suffix') == suffix:
 			return True
 	if file in currentlyProcessing():
 		return True
@@ -361,16 +364,18 @@ class videoConvert(threading.Thread):
 			if conversionQueue.__len__() > 0:
 				error = False
 				with conversionQueueLock:
-					if anyVersionExists(conversionQueue[0]['path'][0], conversionQueue[0]['rawSuffix']):
-						print "TIS"
-					if conversionQueue[0]['path'][0] not in currentlyProcessing() and not (anyVersionExists(conversionQueue[0]['path'][0], conversionQueue[0]['rawSuffix']) and len(currentlyProcessing()) > 0):
-						log("Currently "+str(conversionQueue.__len__()) + " items queued for conversion.")
-						element = conversionQueue.pop(0)
-						self.currentlyConverting = element['path'][0]
+					if conversionQueue.__len__() > 0:
+						if conversionQueue[0]['path'][0] not in currentlyProcessing() and not (anyVersionExists(conversionQueue[0]['path'][0], conversionQueue[0]['rawSuffix']) and len(currentlyProcessing()) > 0):
+							log("Currently "+str(conversionQueue.__len__()) + " items queued for conversion.")
+							element = conversionQueue.pop(0)
+							self.currentlyConverting = element['path'][0]
+						else:
+							# Rotate conversion queue
+							conversionQueue.append(conversionQueue.pop(0))
+							time.sleep(2)
+							continue
 					else:
-						# Rotate conversion queue
-						conversionQueue.append(conversionQueue.pop(0))
-						time.sleep(2)
+						time.sleep(1)
 						continue
 				youtubeUpload.writeMetadata(element['path'][0], {"conversion": "active"})
 				resolutionError = False
@@ -380,6 +385,7 @@ class videoConvert(threading.Thread):
 						error = True
 						log("Error getting video info for " + element['files'][key], "red")
 						break
+					element['duration'] = info['length']
 					numStreams = info['videoStreams']
 					width, height = info['width'], info['height']
 					if (width, height) != (1280, 720):
@@ -424,9 +430,9 @@ class videoConvert(threading.Thread):
 
 		img = Image.new("RGBA", (width, height), (0,0,0,0))
 		draw = ImageDraw.Draw(img)
-		titleFont = "/home/typothree/.fonts/NeoSansStd-Medium.otf"
+		titleFont = "/home/video-convert/.fonts/NeoSansStd-Medium.otf"
 		titleFontEl = ImageFont.truetype(titleFont, 40, encoding='unic')
-		regularFont = "/home/typothree/.fonts/NeoSansStd-Regular.otf"
+		regularFont = "/home/video-convert//.fonts/NeoSansStd-Regular.otf"
 
 		titleSize = titleFontEl.getsize(title)
 
@@ -470,7 +476,7 @@ class videoConvert(threading.Thread):
 		width, height = 1280, 720
 		titleOffsetX = 340
 
-		font = "/home/typothree/.fonts/NeoSansStd-Regular.otf"
+		font = "/home/video-convert/.fonts/NeoSansStd-Regular.otf"
 		fontsize = 44
 		textcolor = (164,164,164,255)
 
@@ -542,7 +548,6 @@ class videoConvert(threading.Thread):
 					sys.stdout.write(output)
 				sys.stdout.flush()
 				stdout += output
-
 		if process.returncode > 0:
 			raise executeException({"returncode": process.returncode, "cmd": cmd})
 		return stdout
@@ -551,7 +556,7 @@ class videoConvert(threading.Thread):
 	@staticmethod
 	def videoInfo(file):
 		try:
-			numStreams = int(videoConvert.executeCommand("ffprobe \""+file+"\" 2>&1 | awk '/Stream .+ Video/{print $0}' | wc -l"))
+			numStreams = int(videoConvert.executeCommand("ffprobe \""+file+"\" 2>&1 | awk '/Stream .+ Video.*1280x720/{print $0}' | wc -l"))
 			metaData = videoConvert.executeCommand("exiftool \""+file+"\"")
 			info = {}
 			for line in metaData.splitlines():
@@ -559,7 +564,11 @@ class videoConvert(threading.Thread):
 				info[key] = value
 			
 			length = info['Duration'].split(":")
-			secs = int(length[0]) * 3600 + int(length[1]) * 60 + int(length[2])
+			if len(length) == 2:
+				hours = 0
+			else:
+				hours = length[0]
+			secs = int(hours) * 3600 + int(length[-2]) * 60 + int(length[-1])
 
 			videoinfo = {
 				"videoStreams": numStreams,
@@ -585,6 +594,9 @@ class videoConvert(threading.Thread):
 			raise metadataException
 		title = metadata.get('title')
 		course_id = options['config'].get('course_id')
+		if not course_id:
+			course_id = " "
+
 		pubdate = metadata.get('pubDate')
 		dirname = os.path.dirname(options['path'][0]) + "/"
 
@@ -617,7 +629,7 @@ class videoConvert(threading.Thread):
 			outro = defaultOutro
 
 		if title and course_id and pubdate:
-			template = open(scriptDir + "convert/avisynth.avs", 'r').read().decode('utf-8')
+			template = open(scriptDir + "video-convert/avisynth.avs", 'r').read().decode('utf-8')
 			videoList = ""
 			for i in range(len(options['files'])):
 
@@ -666,13 +678,13 @@ class videoConvert(threading.Thread):
 
 		conversionJob['outputFile'] = scriptDir+"Konverterede/" + conversionJob['path'][1] + "-"+ conversionJob['options']['suffix']
 		outputFile = conversionJob['outputFile']
-		finalDestination = re.sub(conversionJob['rawSuffix']+"\..+", conversionJob['options']['suffix'] + ".mp4",conversionJob['path'][0])
+		finalDestination = re.sub(conversionJob['rawSuffix']+"\..+", conversionJob['options']['suffix'] + ".m4v",conversionJob['path'][0])
 		if os.path.isfile(finalDestination):
 			log("File " + finalDestination + " already exists!")
 			return False
 		success = False
 		convertLog = ""
-		outputFile = outputFile + ".mp4"
+		outputFile = outputFile + ".m4v"
 		if os.path.isfile(outputFile):
 			log("Removed outputFile prior to encoding ...")
 			os.remove(outputFile)
@@ -693,8 +705,8 @@ class videoConvert(threading.Thread):
 			print "error"
 			print e
 			log("Encoding of " + outputFile + " failed!", 'red')
-		except Exception as e:
-			print e
+		#except Exception as e:
+		#	print e
 		else:
 			if os.path.isfile(outputFile):
 				log("Encoding of " + outputFile + " succeded!", 'green')
@@ -704,7 +716,7 @@ class videoConvert(threading.Thread):
 				log("Encoding of " + outputFile + " failed!", 'red')
 
 		if convertLog:
-			fp = open(outputFile.replace(".mp4",".log"), "w")
+			fp = open(outputFile.replace(".m4v",".log"), "w")
 			fp.write(convertLog)
 			fp.close()
 
@@ -712,23 +724,55 @@ class videoConvert(threading.Thread):
 			return True
 		else:
 			return False
+	def writeFFmetadata(self,options):
+		path = self.winPath(options['path'][0])
+		metadata = youtubeUpload.getMetadata(options['path'][0], unicode=True)
+		ffmeta  = ";FFMETADATA1\n"
+		ffmeta += "title=" + metadata.get('title') + "\n\n"
+		ffmeta += "artist=LearningLab DTU\n"
 
+		pattern = re.compile("(\d{2}:\d{2}) - ([^;]+);")
+		mat = pattern.findall(metadata.get('description'));
+		for key,value in enumerate(mat):
+			timeparts = value[0].split(":")
+			try:
+				nexttime = mat[key+1]
+			except IndexError:
+				nextseconds = options['duration']
+			else:
+				nexttimeparts = nexttime[0].split(":")
+				nextseconds = int(nexttimeparts[0]) * 60 + int(nexttimeparts[1])
+
+			seconds = int(timeparts[0]) * 60 + int(timeparts[1])
+			ffmeta += "[CHAPTER]\n"
+			ffmeta += "TIMEBASE=1/1000\n"
+			ffmeta += "START=" + str(seconds*1000) + "\n"
+			ffmeta += "END=" + str(nextseconds * 1000) + "\n" 
+			ffmeta += "title=" + value[1] + "\n"
+
+		script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.ffmeta', 'w')
+		script.write(ffmeta.encode('utf-8'))
+		script.close
 	# Conversion using avisynth, utilizing branding and intro/outro videos
 	def avisynthConversion(self, job):
 		options = job['options']
 		inputFile = job['path'][0]
-		outputFile = job['outputFile'] + '.mp4'
+		outputFile = job['outputFile'] + '.m4v'
 		audioFile = job['outputFile'] + '.wav'
 		videoFile = job['outputFile'] + '.264'
 		avsScript = job['outputFile'] + '.avs'
 
 		self.writeAvisynth(job)
+		self.writeFFmetadata(job)
+
+		ffmetaFile = job['outputFile'] + '.ffmeta'
+
 		log = ""
 		try:
 			log += self.executeCommand("wine avs2pipe audio \"" + avsScript + "\" > \"" + audioFile + "\"", niceness=True, includeStderr=True)
 			#log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
 			log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -", niceness=True, includeStderr=True)
-			log += self.executeCommand("yes | ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\"", niceness=True, includeStderr=True)
+			log += self.executeCommand("yes | ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -i \"" +ffmetaFile+ "\" -map_metadata 2 -vcodec copy -strict -2 \""+outputFile+"\"", niceness=True, includeStderr=True)
 		except Exception:
 			raise
 		finally:
@@ -742,7 +786,7 @@ class videoConvert(threading.Thread):
 	def handbrakeConversion(self, job):
 		options = job['options']
 		handBrakeArgs = "-e x264 -q " + str(options['quality']) + " -B " + str(options['audiobitrate']) + " -w " + str(options['width']) + " -l " + str(options['height'])	
-		cmd = HandBrakeCLI + " --cpu " + str(CPUS) + " " + handBrakeArgs + " -r "+str(fps)+" -i '" + job['path'][0] + "' -o '" + job['outputFile'] + ".mp4'"
+		cmd = HandBrakeCLI + " --cpu " + str(CPUS) + " " + handBrakeArgs + " -r "+str(fps)+" -i '" + job['path'][0] + "' -o '" + job['outputFile'] + ".m4v'"
 		return self.executeCommand(cmd, niceness=True, includeStderr=True)
 
 
