@@ -15,21 +15,20 @@
 
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-import os,re,time,subprocess,pprint,sys
-import simplejson as json
-import shutil
 import datetime
-import threading
-import gdata.youtube
-import gdata.youtube.service
-from collections import deque
-import smtplib
-from termcolor import colored
-import textwrap
-import locale
-import Image, ImageFont, ImageDraw, ImageChops
 import fcntl
+import locale
+import os, re, time, subprocess, sys
+import shutil
+import smtplib
+import threading
+from collections import deque
+
+import Image, ImageFont, ImageDraw, ImageChops
+import gdata.youtube.service
+import simplejson as json
+from termcolor import colored
+
 
 ##########################################
 ########### CONSTANTS ####################
@@ -122,19 +121,24 @@ def scanStructure():
 	return _fileList, _structure
 
 def addToQueue(job):
-	index = 0
+	index = -1
 	for key, element in enumerate(conversionQueue):
-		index = key + 1
-		if job['priority'] >= element['priority']:
-			if job['pubDate'] < element['pubDate']:
-				index -= 1
+		if job['priority'] > element['priority']:
+			index = key
+			break
+		elif job['priority'] == element['priority']:
+			if int(job['pubDate']) <= int(element['pubDate']):
+				index = key
 	 			break
-	conversionQueue.insert(index, job)
+	if index == -1:
+		conversionQueue.append(job)
+	else:
+		conversionQueue.insert(index, job)
 
 def printQueue():
 	log("### CURRENT QUEUE ###", 'green')
 	for key, el in enumerate(conversionQueue):
-		log(str(key+1) + "\t" + el['preset'] + "\t" + el['metadata']['pubDate'] + "\t" + el['path'][0], 'green')
+		log(str(key+1) + "\t" + el['preset'] + "\t" + el['metadata']['pubDate'] + "\t" + str(el['priority']) + "\t" + el['path'][0], 'green')
 
 def getRawFiles():
 	rawFiles = {}
@@ -230,9 +234,9 @@ def checkFiles(force=False):
 					if not os.path.isfile(thumbnail):
 						info = videoConvert.videoInfo(file)
 						try:
-							videoConvert.executeCommand("ffmpeg -ss "+str(info['length']/3)+" -i '"+file+"' -vframes 1 -s 640x360 '"+thumbnail+"'")
+							videoConvert.executeCommand("ffmpeg -ss "+str(info['length']/3)+" -i '"+file+"' -vframes 1 -s 640x360 '"+thumbnail+"'", includeStderr=True)
 						except executeException:
-							log("Error generating thumbnail: " + thumbnail, 'red')
+							log("Error generating thumbnail: " + thumbnail, 'magenta')
 						else:
 							log("Generated thumbnail: " + thumbnail , 'green')
 	#conversionQueue = sorted(conversionQueue, key=lambda k: k.get('priority'), reverse=True)
@@ -420,8 +424,9 @@ class videoConvert(threading.Thread):
 		if error or resolutionError:
 			youtubeUpload.writeMetadata(self.job['path'][0], {"conversion": "failed"})
 		self.currentlyConverting = False
-		with conversionQueueLock:
-			conversionQueue.remove(self)
+
+	def cleanup(self):
+		youtubeUpload.writeMetadata(self.job['path'][0], {"conversion": False})
 
 	def generateIntroOverlay(self, title, course, date,file):
 		import Image, ImageDraw, ImageFont
@@ -798,7 +803,7 @@ class videoConvert(threading.Thread):
 class youtubeUpload (threading.Thread):
 	queue = deque()
 	def run(self):
-		while not (mainThreadDone and not conversionObjs[0].isAlive()) or self.queue.__len__() > 0:
+		while not mainThreadDone or self.queue.__len__() > 0:
 			if self.queue.__len__() > 0:
 				element = self.queue.popleft()
 				metadata = self.getMetadata(element['filename'])
@@ -1001,18 +1006,22 @@ while 1:
 	if conversionObjs.__len__() == 0 and conversionQueue.__len__() == 0:
 		log("No more work to do - exiting main loop")
 		break
-	if conversionObjs.__len__() != conversionThreads and conversionQueue.__len__() > 0:
-		with convertObjLock:
-			with conversionQueueLock:
-				if conversionQueue[0]['path'][0] not in currentlyProcessing() and not (anyVersionExists(conversionQueue[0]['path'][0], conversionQueue[0]['rawSuffix']) and conversionObjs.__len__() > 0):
-					log("Currently "+str(conversionQueue.__len__()) + " items queued for conversion.")
-					printQueue()
-					element = conversionQueue.pop(0)
+	with convertObjLock:
+		with conversionQueueLock:
+			for thread in conversionObjs:
+				if not thread.is_alive():
+					thread.cleanup()
+					conversionObjs.remove(thread)
+			if conversionObjs.__len__() != conversionThreads and conversionQueue.__len__() > 0:
+						if conversionQueue[0]['path'][0] not in currentlyProcessing() and not (anyVersionExists(conversionQueue[0]['path'][0], conversionQueue[0]['rawSuffix']) and conversionObjs.__len__() > 0):
+							log("Currently "+str(conversionQueue.__len__()) + " items queued for conversion.")
+							printQueue()
+							element = conversionQueue.pop(0)
 
-					log("Created videoConvert object.")
-					vidConv = videoConvert(element)
-					conversionObjs.append(vidConv)
-					vidConv.start()
+							log("Created videoConvert object.")
+							vidConv = videoConvert(element)
+							conversionObjs.append(vidConv)
+							vidConv.start()
 	lastCount = conversionObjs.__len__()
 	time.sleep(1)
 
