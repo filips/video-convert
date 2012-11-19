@@ -609,7 +609,7 @@ class videoConvert(threading.Thread):
 
 		producer = metadata.get('producer')
 		technician = metadata.get('technician')
-		lecturer = metadata.get('lecturer')
+		lecturer = metadata.get('performers')
 		year = datetime.datetime.strptime(pubdate, "%Y-%m-%d %H:%M").strftime("%Y")
 		if not producer:
 			producer = u"LearningLab DTU / Kasper Skårhøj"
