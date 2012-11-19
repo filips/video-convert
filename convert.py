@@ -603,6 +603,7 @@ class videoConvert(threading.Thread):
 		if not course_id:
 			course_id = " "
 
+
 		pubdate = metadata.get('pubDate')
 		dirname = os.path.dirname(options['path'][0]) + "/"
 
@@ -613,8 +614,6 @@ class videoConvert(threading.Thread):
 		if not producer:
 			producer = u"LearningLab DTU / Kasper Skårhøj"
 
-		self.generateIntroOverlay(title, course_id, pubdate, scriptDir+"Konverterede/" + options['path'][1] + '-introOverlay.png')
-		self.generateOutroOverlays(producer, technician , lecturer, year, scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay')
 		startOffset = metadata.get('startOffset')
 		endOffset   = metadata.get('endOffset')
 
@@ -635,6 +634,8 @@ class videoConvert(threading.Thread):
 			outro = defaultOutro
 
 		if title and course_id and pubdate:
+			self.generateIntroOverlay(title, course_id, pubdate, scriptDir+"Konverterede/" + options['path'][1] + '-introOverlay.png')
+			self.generateOutroOverlays(producer, technician , lecturer, year, scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay')
 			template = open(scriptDir + "video-convert/avisynth.avs", 'r').read().decode('utf-8')
 			videoList = ""
 			for i in range(len(options['files'])):
@@ -885,13 +886,13 @@ class youtubeUpload (threading.Thread):
 			for line in lines:
 				if unicode==True:
 					line = line.decode('utf-8')
-				match = re.search('^\s*([^#^\s]\S+)\s*=\s*([^\[^\s]\S.*\S|\S|\S\S)\s*$', line)
-				if match:
-					submatch = re.search('^{(.+)}$', match.group(2))
+				parts = [x.strip() for x in line.split('=', 2)]
+				if len(parts) == 2 and not parts[1].startswith('['):
+					submatch = re.search('^{(.+)}$', parts[1])
 					if submatch:
-						metadata[match.group(1)] = submatch.group(1).split(',')
+						metadata[parts[0]] = submatch.group(1).split(',')
 					else:
-						metadata[match.group(1)] = match.group(2)
+						metadata[parts[0]] = parts[1]
 			return metadata
 		else:
 			return False
