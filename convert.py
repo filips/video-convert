@@ -739,27 +739,31 @@ class videoConvert(threading.Thread):
 		ffmeta += "artist=LearningLab DTU\n"
 
 		pattern = re.compile("(\d{2}:\d{2}) - ([^;]+);")
-		mat = pattern.findall(metadata.get('description'));
-		for key,value in enumerate(mat):
-			timeparts = value[0].split(":")
-			try:
-				nexttime = mat[key+1]
-			except IndexError:
-				nextseconds = options['duration']
-			else:
-				nexttimeparts = nexttime[0].split(":")
-				nextseconds = int(nexttimeparts[0]) * 60 + int(nexttimeparts[1])
+		description = metadata.get('description')
+		if description:
+			mat = pattern.findall(description);
+			for key,value in enumerate(mat):
+				timeparts = value[0].split(":")
+				try:
+					nexttime = mat[key+1]
+				except IndexError:
+					nextseconds = options['duration']
+				else:
+					nexttimeparts = nexttime[0].split(":")
+					nextseconds = int(nexttimeparts[0]) * 60 + int(nexttimeparts[1])
 
-			seconds = int(timeparts[0]) * 60 + int(timeparts[1])
-			ffmeta += "[CHAPTER]\n"
-			ffmeta += "TIMEBASE=1/1000\n"
-			ffmeta += "START=" + str(seconds*1000) + "\n"
-			ffmeta += "END=" + str(nextseconds * 1000) + "\n" 
-			ffmeta += "title=" + value[1] + "\n"
+				seconds = int(timeparts[0]) * 60 + int(timeparts[1])
+				ffmeta += "[CHAPTER]\n"
+				ffmeta += "TIMEBASE=1/1000\n"
+				ffmeta += "START=" + str(seconds*1000) + "\n"
+				ffmeta += "END=" + str(nextseconds * 1000) + "\n" 
+				ffmeta += "title=" + value[1] + "\n"
 
-		script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.ffmeta', 'w')
-		script.write(ffmeta.encode('utf-8'))
-		script.close
+			script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.ffmeta', 'w')
+			script.write(ffmeta.encode('utf-8'))
+			script.close
+		else:
+			return False
 	# Conversion using avisynth, utilizing branding and intro/outro videos
 	def avisynthConversion(self, job):
 		options = job['options']
@@ -770,16 +774,20 @@ class videoConvert(threading.Thread):
 		avsScript = job['outputFile'] + '.avs'
 
 		self.writeAvisynth(job)
-		self.writeFFmetadata(job)
-
-		ffmetaFile = job['outputFile'] + '.ffmeta'
+		if self.writeFFmetadata(job):
+			ffmetaFile = job['outputFile'] + '.ffmeta'
+		else:
+			ffmetaFile = None
 
 		log = ""
 		try:
 			log += self.executeCommand("wine avs2pipe audio \"" + avsScript + "\" > \"" + audioFile + "\"", niceness=True, includeStderr=True)
 			#log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
 			log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -", niceness=True, includeStderr=True)
-			log += self.executeCommand("yes | ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -i \"" +ffmetaFile+ "\" -map_metadata 2 -vcodec copy -strict -2 \""+outputFile+"\"", niceness=True, includeStderr=True)
+			if ffmetaFile:
+				log += self.executeCommand("yes | ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -i \"" +ffmetaFile+ "\" -map_metadata 2 -vcodec copy -strict -2 \""+outputFile+"\"", niceness=True, includeStderr=True)
+			else:
+				log += self.executeCommand("yes | ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\"", niceness=True, includeStderr=True)
 		except Exception:
 			raise
 		finally:
