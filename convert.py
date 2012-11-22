@@ -762,6 +762,7 @@ class videoConvert(threading.Thread):
 			script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.ffmeta', 'w')
 			script.write(ffmeta.encode('utf-8'))
 			script.close
+			return True
 		else:
 			return False
 	# Conversion using avisynth, utilizing branding and intro/outro videos
@@ -894,7 +895,7 @@ class youtubeUpload (threading.Thread):
 			for line in lines:
 				if unicode==True:
 					line = line.decode('utf-8')
-				parts = [x.strip() for x in line.split('=', 2)]
+				parts = [x.strip() for x in line.split('=', 1)]
 				if len(parts) == 2 and not parts[1].startswith('['):
 					submatch = re.search('^{(.+)}$', parts[1])
 					if submatch:
