@@ -214,6 +214,9 @@ def checkFiles(force=False):
 							playlist = youtube.get('playlist')
 							if username and password and developer_key:
 								filename = file.replace(localSuffix, version)
+
+								# UNSTABLE!!!
+								filename = filename[:-3] + "m4v"
 								youtubeUpload.addToQueue(filename, youtube.copy())
 					# Check if videos are to be converted
 					if config.get("convert") == True:
@@ -406,8 +409,10 @@ class videoConvert(threading.Thread):
 					# Adding job to youtubeUpload's queue. Should probably be handled by a watcher thread instead
 					youtubeConfig = self.job['config'].get("youtube")
 					destination = re.sub(self.job['rawSuffix'], self.job['options']['suffix'],self.job['path'][0])
+
 					if youtubeConfig and self.job['config'].get('youtubeUpload') == True:
 						if self.job.get("preset") == youtubeConfig.get("uploadVersion"):
+							destination = destination[:-3] + "m4v"
 							youtubeUpload.addToQueue(destination, youtubeConfig)
 				else:
 					error = True
@@ -850,10 +855,14 @@ class youtubeUpload (threading.Thread):
 			metadata['itunes:keywords'] = defaultYoutubeKeywords
 			log("WARNING: No keywords specified for file: " + preferences['filename'] + "!", 'yellow')
 
+		key = ""
+		for i in metadata['itunes:keywords'].split(" "):
+			if len(i) >= 2:
+				key += i + ", "
 		options = {
 			"title": metadata['title'],
 			"description": metadata['description'],
-			"keywords": metadata['itunes:keywords'],
+			"keywords": key[:-2],
 			"private": private,
 			"path": preferences['filename'],
 			"category": preferences.get('category')
@@ -1005,10 +1014,11 @@ conversionQueue = []
 filesAdded = []
 filesAddedYoutube = []
 
+checkFiles()
+
 youtube = youtubeUpload()
 youtube.start()
 
-checkFiles()
 lastCount = 0
 while 1:
 	if conversionObjs.__len__() != lastCount:
