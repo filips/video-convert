@@ -859,6 +859,10 @@ class youtubeUpload (threading.Thread):
 		for i in metadata['itunes:keywords'].split(" "):
 			if len(i) >= 2:
 				key += i + ", "
+
+		metadata['description'] = metadata['description'].replace("<", "←")
+		metadata['description'] = metadata['description'].replace(">", "→")
+
 		options = {
 			"title": metadata['title'],
 			"description": metadata['description'],
