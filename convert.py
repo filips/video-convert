@@ -940,10 +940,16 @@ class youtubeUpload (threading.Thread):
 					if data[idx] != False:
 						lines.append(idx+" = " + str(data[idx]) + "\n")
 				f.close()
-			with open(metafile, 'w') as f:
-				fcntl.flock(f, fcntl.LOCK_EX)
-				f.writelines(lines)
-				f.close()
+			try:
+				with open(metafile, 'w') as f:
+					fcntl.flock(f, fcntl.LOCK_EX)
+					f.writelines(lines)
+					f.close()
+			except IOError:
+				log("Couldn't write metadata", 'red')
+				return False
+			else:
+				return True
 
 	def retrievePlaylists(self):
 		playlist_feed = self.yt_service.GetYouTubePlaylistFeed(username='default')
@@ -1025,8 +1031,6 @@ youtube.start()
 
 lastCount = 0
 while 1:
-	if conversionObjs.__len__() != lastCount:
-		checkFiles(force=True)
 	if conversionObjs.__len__() == 0 and conversionQueue.__len__() == 0:
 		log("No more work to do - exiting main loop")
 		break
@@ -1036,6 +1040,8 @@ while 1:
 				if not thread.is_alive():
 					thread.cleanup()
 					conversionObjs.remove(thread)
+			if conversionObjs.__len__() != lastCount:
+				checkFiles(force=True)
 			if conversionObjs.__len__() != conversionThreads and conversionQueue.__len__() > 0:
 						if conversionQueue[0]['path'][0] not in currentlyProcessing() and not (anyVersionExists(conversionQueue[0]['path'][0], conversionQueue[0]['rawSuffix']) and conversionObjs.__len__() > 0):
 							log("Currently "+str(conversionQueue.__len__()) + " items queued for conversion.")
