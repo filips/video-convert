@@ -1,7 +1,7 @@
 #!/usr/bin/python2.6
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2012 Filip Sandborg-Olsen <filipsandborg(at)gmail.com>
+# Copyright (c) 2012 Filip Sandborg-Olsen <filipsandborg@gmail.com>
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -1035,13 +1035,13 @@ while 1:
 		log("No more work to do - exiting main loop")
 		break
 	with convertObjLock:
+		for thread in conversionObjs:
+			if not thread.is_alive():
+				thread.cleanup()
+				conversionObjs.remove(thread)
+		if conversionObjs.__len__() != lastCount:
+			checkFiles(force=True)
 		with conversionQueueLock:
-			for thread in conversionObjs:
-				if not thread.is_alive():
-					thread.cleanup()
-					conversionObjs.remove(thread)
-			if conversionObjs.__len__() != lastCount:
-				checkFiles(force=True)
 			if conversionObjs.__len__() != conversionThreads and conversionQueue.__len__() > 0:
 						if conversionQueue[0]['path'][0] not in currentlyProcessing() and not (anyVersionExists(conversionQueue[0]['path'][0], conversionQueue[0]['rawSuffix']) and conversionObjs.__len__() > 0):
 							log("Currently "+str(conversionQueue.__len__()) + " items queued for conversion.")
