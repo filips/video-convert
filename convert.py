@@ -641,7 +641,7 @@ class videoConvert(threading.Thread):
 			b = int(c[5:7], 16)
 			titleColor = (r,g,b, 255)
 		else:
-			titleColor = (164,164,164,255)
+			titleColor = (27,65,132,255)
 
 		if os.path.isfile(dirname + "intro.mov"):
 			intro = self.winPath(dirname + "intro.mov")
