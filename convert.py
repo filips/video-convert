@@ -47,6 +47,8 @@ defaultYoutubeKeywords = "Education"
 defaultIntro = "z:\\home\\video-convert\\intro.mov"
 defaultOutro = "z:\\home\\video-convert\\outro.mov"
 
+defaultLogo = "z:\\home\\video-convert\\dtulogo.png"
+
 rawSuffix = "raw" # Used to be 720p
 
 CPUS = 4
@@ -433,7 +435,7 @@ class videoConvert(threading.Thread):
 	def cleanup(self):
 		youtubeUpload.writeMetadata(self.job['path'][0], {"conversion": False})
 
-	def generateIntroOverlay(self, title, course, date,file):
+	def generateIntroOverlay(self, title, course, date,file, color):
 		import Image, ImageDraw, ImageFont
 
 		width, height = 1280, 720
@@ -475,8 +477,8 @@ class videoConvert(threading.Thread):
 
 		strings = []
 		for key,part in enumerate(titleSegments):
-			strings.append([(titleOffsetX, 430 + 45*key), part.upper(), (27,65,132,255), 40, titleFont])
-		strings.append([(titleOffsetX, 400), course.upper(), (27,65,132,255), 24, regularFont])
+			strings.append([(titleOffsetX, 430 + 45*key), part.upper(), color, 40, titleFont])
+		strings.append([(titleOffsetX, 400), course.upper(), color, 24, regularFont])
 		strings.append([(-20,-1), date, (204,204,204,255), 24, regularFont])
 
 		self.drawText((width,height), strings).save(file)
@@ -573,7 +575,7 @@ class videoConvert(threading.Thread):
 			for line in metaData.splitlines():
 				key, value = [x.strip() for x in line.split(" : ")]
 				info[key] = value
-			
+
 			length = info['Duration'].split(":")
 			if len(length) == 2:
 				hours = 0
@@ -591,6 +593,8 @@ class videoConvert(threading.Thread):
 			return False
 		except ValueError as e:
 			return False
+		except KeyError: # NO LARGE FILE SUPPORT IN EXIFTOOL!!!!!!
+			return False 
 		else:
 			return videoinfo
 
@@ -629,6 +633,16 @@ class videoConvert(threading.Thread):
 			branding = False
 			inout    = False
 
+		c = options['config'].get('titleColor')
+		if c and len(c) == 7:
+			c = options['config'].get('titleColor')
+			r = int(c[1:3],16)
+			g = int(c[3:5], 16)
+			b = int(c[5:7], 16)
+			titleColor = (r,g,b, 255)
+		else:
+			titleColor = (164,164,164,255)
+
 		if os.path.isfile(dirname + "intro.mov"):
 			intro = self.winPath(dirname + "intro.mov")
 		else:
@@ -638,8 +652,13 @@ class videoConvert(threading.Thread):
 		else:
 			outro = defaultOutro
 
+		if os.path.isfile(dirname + "logo.png"):
+			logoOverlay = self.winPath(dirname + "logo.png")
+		else:
+			logoOverlay = defaultLogo
+
 		if title and course_id and pubdate:
-			self.generateIntroOverlay(title, course_id, pubdate, scriptDir+"Konverterede/" + options['path'][1] + '-introOverlay.png')
+			self.generateIntroOverlay(title, course_id, pubdate, scriptDir+"Konverterede/" + options['path'][1] + '-introOverlay.png', titleColor)
 			self.generateOutroOverlays(producer, technician , lecturer, year, scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay')
 			template = open(scriptDir + "video-convert/avisynth.avs", 'r').read().decode('utf-8')
 			videoList = ""
@@ -670,7 +689,8 @@ class videoConvert(threading.Thread):
 				fps=fps,
 				introoverlay=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-introOverlay.png'),
 				outrooverlay1=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay1.png'),
-				outrooverlay2=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay2.png')
+				outrooverlay2=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay2.png'),
+				logoOverlay=logoOverlay
 				)
 			script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.avs', 'w')
 			script.write(template.encode('latin-1', 'ignore'))
