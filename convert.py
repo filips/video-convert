@@ -41,6 +41,8 @@ podcastPath = "/home/video-convert/podcasts"
 scriptDir = "/home/video-convert/"
 HandBrakeCLI = "/home/typothree/prefix/bin/HandBrakeCLI"
 
+queueTextFile = "/home/video-convert/podcasts/queue.html"
+
 # YouTube parameters to be passed if metadata is missing
 defaultYoutubeCategory = "Education"
 defaultYoutubeKeywords = "Education"
@@ -95,6 +97,73 @@ lastScanned = 0
 ##########################################
 ########### STANDALONE METHODS ###########
 ##########################################
+
+def saveQueueText():
+	accum = ""
+	accum += """
+<html>
+	<head>
+		<title>Conversion queue</title>
+		<style>
+			table {
+				margin: auto;
+				margin-top: 100px;
+				border-spacing:0;
+		  		border-collapse:collapse;
+		  		width: 900px;
+			}
+			table tr th {
+				text-align: left;
+			}
+			table tr.header {
+				background-color: rgb(153,0,0);
+				color: #fff;
+			}
+			table tr.header th {
+				padding:5px;
+				padding-right: 40px;
+			}
+			table td {
+				padding: 5px;
+			}
+			table tr.odd {
+				background-color: #ddd;
+			}
+			body {
+				font-family: palatino;
+				font-size: 11px;
+			}
+		</style>
+		<meta http-equiv="refresh" content="5">
+	</head>
+	<body>
+		<table>
+			<tr class="header">
+				<th>#</th>
+				<th>Name</th>
+				<th>Version</th>
+				<th>Priority</th>
+				<th>Date</th>
+			</tr>
+	"""
+	with conversionQueueLock:
+		for key, el in enumerate(conversionQueue):
+			accum += """
+			<tr class="data {oddity}">
+				<td>{id}</td>
+				<td>{path}</td>
+				<td>{version}</td>
+				<td>{priority}</td>
+				<td>{date}</td>
+			</tr>			
+			""".format(id=str(key+1), version=el['preset'], date=el['metadata']['pubDate'].replace(" ", " "), priority=str(el['priority']), path=el['path'][0], oddity='odd' if key%2==1 else 'even')
+	accum += """
+		</table>
+	</body>
+</html>
+	"""
+	with open(queueTextFile, 'w') as f:
+		f.write(accum)
 
 def scanStructure():
 	_structure = {}
@@ -485,7 +554,7 @@ class videoConvert(threading.Thread):
 
 		self.drawText((width,height), strings).save(file)
 
-	def generateOutroOverlays(self, producer, technician, lecturer, year, file):
+	def generateOutroOverlays(self, producer, technician, lecturer, year, nodtubranding, file):
 		import Image, ImageDraw, ImageFont
 
 		width, height = 1280, 720
@@ -495,7 +564,10 @@ class videoConvert(threading.Thread):
 		fontsize = 44
 		textcolor = (164,164,164,255)
 
-		copyright = u"\u00A9" + " "+year+" Danmarks Tekniske Universitet"
+		if nodtubranding:
+			copyright = u""
+		else:
+			copyright = u"\u00A9" + " "+year+" Danmarks Tekniske Universitet"
 		self.drawText((width, height), [[(-50, -40), copyright, textcolor, fontsize, font]]).save(file + "1.png")
 
 		strings = []
@@ -622,7 +694,9 @@ class videoConvert(threading.Thread):
 		technician = metadata.get('technician')
 		lecturer = metadata.get('performers')
 		year = datetime.datetime.strptime(pubdate, "%Y-%m-%d %H:%M").strftime("%Y")
-		if not producer:
+
+		nodtubranding = options['config'].get('nodtubranding')
+		if not producer and not nodtubranding:
 			producer = u"LearningLab DTU / Kasper Skårhøj"
 
 		startOffset = metadata.get('startOffset')
@@ -661,7 +735,7 @@ class videoConvert(threading.Thread):
 
 		if title and course_id and pubdate:
 			self.generateIntroOverlay(title, course_id, pubdate, scriptDir+"Konverterede/" + options['path'][1] + '-introOverlay.png', titleColor)
-			self.generateOutroOverlays(producer, technician , lecturer, year, scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay')
+			self.generateOutroOverlays(producer, technician , lecturer, year, nodtubranding, scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay')
 			template = open(scriptDir + "video-convert/avisynth.avs", 'r').read().decode('utf-8')
 			videoList = ""
 			for i in range(len(options['files'])):
@@ -992,6 +1066,7 @@ filesAdded = []
 filesAddedYoutube = []
 
 checkFiles()
+saveQueueText()
 
 youtube = youtubeUpload()
 youtube.start()
@@ -1008,6 +1083,7 @@ while 1:
 				conversionObjs.remove(thread)
 		if conversionObjs.__len__() != lastCount:
 			checkFiles(force=True)
+			saveQueueText()
 		with conversionQueueLock:
 			if conversionObjs.__len__() != conversionThreads and conversionQueue.__len__() > 0:
 						if conversionQueue[0]['path'][0] not in currentlyProcessing() and not (anyVersionExists(conversionQueue[0]['path'][0], conversionQueue[0]['rawSuffix']) and conversionObjs.__len__() > 0):
