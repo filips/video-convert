@@ -16,6 +16,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import re, os, fcntl
+
 def getMetadata(file, unicode=False):
 	metafile = re.split('-\w+\.\w+$',file)[0] + ".txt"
 	if os.path.isfile(metafile):
