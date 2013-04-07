@@ -66,7 +66,7 @@ def writeMetadata(file, data):
 				f.writelines(lines)
 				f.close()
 		except IOError:
-			log("Couldn't write metadata", 'red')
+			print("Couldn't write metadata")
 			return False
 		else:
 			return True
