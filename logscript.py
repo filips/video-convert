@@ -16,6 +16,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os, re, datetime, pprint, sys, fcntl
+from metadata import writeMetadata
 
 logDir = "/var/lib/awstats/"
 webRoot = "/home/typothree/html/"
@@ -30,32 +31,6 @@ logFiles = {}
 
 if not logDir.endswith(os.path.sep):
     logDir += os.path.sep
-
-def writeMetadata(file, data):
-	metafile = re.split('-\w+\.\w+$',file)[0] + ".txt"
-	if os.path.isfile(metafile):
-		with open(metafile, 'r') as f:
-			fcntl.flock(f, fcntl.LOCK_SH)
-			lines = f.readlines()
-			for key, line in enumerate(lines):
-				match = re.search('^\s*(' + "|".join(data.keys()) + ')\s*=', line)
-				if match:
-					if data[match.group(1)] == False:
-						lines.pop(key)
-					else:
-						lines[key] = match.group(1) + " = " + str(data[match.group(1)]) + "\n"
-					data.pop(match.group(1))
-				elif line[-1] != '\n':
-					lines[key] = line + '\n'
-			for idx in data:
-				if data[idx] != False:
-					lines.append(idx+" = " + str(data[idx]) + "\n")
-			f.close()
-		with open(metafile, 'w') as f:
-			fcntl.flock(f, fcntl.LOCK_EX)
-			print "Writing: " + metafile
-			f.writelines(lines)
-			f.close()
 
 def readLog(file):
 	logFile = {}

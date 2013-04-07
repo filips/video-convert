@@ -29,6 +29,8 @@ import gdata.youtube.service
 import simplejson as json
 from termcolor import colored
 
+from metadata import getMetadata, writeMetadata
+
 
 ##########################################
 ########### CONSTANTS ####################
@@ -192,7 +194,7 @@ def checkFiles(force=False):
 					#if not firstLoop:
 					#	log("Found new raw file, " + file, 'green')
 					config = getConfig(file)
-					metadata = youtubeUpload.getMetadata(file)
+					metadata = getMetadata(file)
 					if not metadata:
 						log("Missing metadata for file " + file, 'red')
 						continue
@@ -387,7 +389,7 @@ class videoConvert(threading.Thread):
 		self.currentlyConverting = self.job['path'][0]
 	def run(self):
 		error = False
-		youtubeUpload.writeMetadata(self.job['path'][0], {"conversion": "active"})
+		writeMetadata(self.job['path'][0], {"conversion": "active"})
 		resolutionError = False
 		for key in self.job['files']:
 			info = self.videoInfo(element['files'][key])
@@ -400,13 +402,13 @@ class videoConvert(threading.Thread):
 			width, height = info['width'], info['height']
 			if (width, height) != (1280, 720):
 				log("Videofile " + self.job['files'][key] + " has resolution " + str(width) + "x" + str(height) + " and was quarantined!", 'red')
-				youtubeUpload.writeMetadata(self.job['path'][0], {"quarantine": "true"})
+				writeMetadata(self.job['path'][0], {"quarantine": "true"})
 				resolutionError = True
 		if not resolutionError and not error:
 			if numStreams == 1:
 				if self.handleConversionJob(self.job):
 
-					youtubeUpload.writeMetadata(element['path'][0], {"conversion": False})
+					writeMetadata(element['path'][0], {"conversion": False})
 
 					# Adding job to youtubeUpload's queue. Should probably be handled by a watcher thread instead
 					youtubeConfig = self.job['config'].get("youtube")
@@ -425,15 +427,15 @@ class videoConvert(threading.Thread):
 				error = True
 			else:
 				log("Video contains " + str(numStreams) + " videostrems, and was quarantined! ("+self.job['path'][0]+")", 'red')
-				youtubeUpload.writeMetadata(self.job['path'][0], {"quarantine": "true"})
+				writeMetadata(self.job['path'][0], {"quarantine": "true"})
 				error = True
 
 		if error or resolutionError:
-			youtubeUpload.writeMetadata(self.job['path'][0], {"conversion": "failed"})
+			writeMetadata(self.job['path'][0], {"conversion": "failed"})
 		self.currentlyConverting = False
 
 	def cleanup(self):
-		youtubeUpload.writeMetadata(self.job['path'][0], {"conversion": False})
+		writeMetadata(self.job['path'][0], {"conversion": False})
 
 	def generateIntroOverlay(self, title, course, date,file, color):
 		import Image, ImageDraw, ImageFont
@@ -604,7 +606,7 @@ class videoConvert(threading.Thread):
 	# Write avisynth script
 	def writeAvisynth(self,options):
 		path = self.winPath(options['path'][0])
-		metadata = youtubeUpload.getMetadata(options['path'][0], unicode=True)
+		metadata = getMetadata(options['path'][0], unicode=True)
 		if metadata == False:
 			raise metadataException
 		title = metadata.get('title')
@@ -758,7 +760,7 @@ class videoConvert(threading.Thread):
 			return False
 	def writeFFmetadata(self,options):
 		path = self.winPath(options['path'][0])
-		metadata = youtubeUpload.getMetadata(options['path'][0], unicode=True)
+		metadata = getMetadata(options['path'][0], unicode=True)
 		ffmeta  = ";FFMETADATA1\n"
 		ffmeta += "title=" + metadata.get('title') + "\n\n"
 		ffmeta += "artist=LearningLab DTU\n"
@@ -841,7 +843,7 @@ class youtubeUpload (threading.Thread):
 		while not mainThreadDone or self.queue.__len__() > 0:
 			if self.queue.__len__() > 0:
 				element = self.queue.popleft()
-				metadata = self.getMetadata(element['filename'])
+				metadata = getMetadata(element['filename'])
 				if metadata.get("enotelms:YouTubeUID"):
 					log("Video is already on YouTube: " + element['filename'], 'yellow')
 					continue
@@ -853,7 +855,7 @@ class youtubeUpload (threading.Thread):
 					else:
 						video_id = self.uploadFromMetaData(element, metadata)
 						if video_id != False:
-							self.writeMetadata(element['filename'],{"enotelms:YouTubeUID": video_id})
+							writeMetadata(element['filename'],{"enotelms:YouTubeUID": video_id})
 						else:
 							log("Youtube upload failed!", 'red')
 			time.sleep(0.5)
@@ -915,61 +917,6 @@ class youtubeUpload (threading.Thread):
 		yt_service.ProgrammaticLogin()
 
 		return yt_service
-
-	@staticmethod
-	def getMetadata(file, unicode=False):
-		metafile = re.split('-\w+\.\w+$',file)[0] + ".txt"
-		if os.path.isfile(metafile):
-			with open(metafile, 'r') as fp:
-				fcntl.flock(fp, fcntl.LOCK_SH)
-				lines = fp.readlines()
-				fp.close()
-			metadata = {}
-			for line in lines:
-				if unicode==True:
-					line = line.decode('utf-8')
-				parts = [x.strip() for x in line.split('=', 1)]
-				if len(parts) == 2 and not parts[1].startswith('['):
-					submatch = re.search('^{(.+)}$', parts[1])
-					if submatch:
-						metadata[parts[0]] = submatch.group(1).split(',')
-					else:
-						metadata[parts[0]] = parts[1]
-			return metadata
-		else:
-			return False
-	
-	@staticmethod
-	def writeMetadata(file, data):
-		metafile = re.split('-\w+\.\w+$',file)[0] + ".txt"
-		if os.path.isfile(metafile):
-			with open(metafile, 'r') as f:
-				fcntl.flock(f, fcntl.LOCK_SH)
-				lines = f.readlines()
-				for key, line in enumerate(lines):
-					match = re.search('^\s*(' + "|".join(data.keys()) + ')\s*=', line)
-					if match:
-						if data[match.group(1)] == False:
-							lines.pop(key)
-						else:
-							lines[key] = match.group(1) + " = " + str(data[match.group(1)]) + "\n"
-						data.pop(match.group(1))
-					elif line[-1] != '\n':
-						lines[key] = line + '\n'
-				for idx in data:
-					if data[idx] != False:
-						lines.append(idx+" = " + str(data[idx]) + "\n")
-				f.close()
-			try:
-				with open(metafile, 'w') as f:
-					fcntl.flock(f, fcntl.LOCK_EX)
-					f.writelines(lines)
-					f.close()
-			except IOError:
-				log("Couldn't write metadata", 'red')
-				return False
-			else:
-				return True
 
 	def retrievePlaylists(self):
 		playlist_feed = self.yt_service.GetYouTubePlaylistFeed(username='default')
