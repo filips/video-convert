@@ -650,12 +650,15 @@ class videoConvert(threading.Thread):
 				key, value = [x.strip() for x in line.split(" : ")]
 				info[key] = value
 
-			length = info['Duration'].split(":")
-			if len(length) == 2:
-				hours = 0
+			if info['Duration'][-1] == 's':
+				secs = float(info['Duration'][0:-2])
 			else:
-				hours = length[0]
-			secs = int(hours) * 3600 + int(length[-2]) * 60 + int(length[-1])
+				length = info['Duration'].split(":")
+				if len(length) == 2:
+					hours = 0
+				else:
+					hours = length[0]
+				secs = int(hours) * 3600 + int(length[-2]) * 60 + int(length[-1])
 
 			videoinfo = {
 				"videoStreams": numStreams,
