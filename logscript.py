@@ -123,6 +123,6 @@ for basename in podcastInfo:
 	try:
 		if os.path.isfile(basename + '.txt'):
 			print("Writing metadata for " + basename)
-			#writeMetadata(basename + '-720p.mp4', counts)
+			writeMetadata(basename + '-720p.mp4', counts)
 	except IOError:
 		print("Permission denied when writing metadata for " + basename)
