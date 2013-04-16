@@ -60,7 +60,8 @@ def writeMetadata(file, data):
 					lines[key] = line + '\n'
 			for idx in data:
 				if data[idx] != False:
-					lines.append(idx+" = " + str(data[idx]) + "\n")
+					unicodeLine = idx+" = " + unicode(data[idx]) + "\n"
+					lines.append(unicodeLine.encode('utf-8'))
 			f.close()
 		try:
 			with open(metafile, 'w') as f:
