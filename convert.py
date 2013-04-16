@@ -460,13 +460,30 @@ class videoConvert(threading.Thread):
 		error = False
 		writeMetadata(self.job['path'][0], {"conversion": "active"})
 		resolutionError = False
+
+		self.job['duration'] = 0.0
+
+		startOffset = self.job['metadata'].get('startOffset')
+		endOffset   = self.job['metadata'].get('endOffset')
+		
 		for key in self.job['files']:
 			info = self.videoInfo(element['files'][key])
 			if not info:
 				error = True
 				log("Error getting video info for " + self.job['files'][key], "red")
 				break
-			self.job['duration'] = info['length']
+
+			try:
+				soff = startOffset[key]
+			except (IndexError, TypeError) as e:
+				soff = 0.0
+			try:
+				eoff = endOffset[key]
+			except (IndexError, TypeError):
+				eoff = 0.0
+			
+			self.job['duration'] += float(info['length']) - float(soff) - float(eoff)
+
 			numStreams = info['videoStreams']
 			width, height = info['width'], info['height']
 			if (width, height) != (1280, 720):
@@ -684,7 +701,9 @@ class videoConvert(threading.Thread):
 		metadata = getMetadata(options['path'][0], unicode=True)
 		if metadata == False:
 			raise metadataException
-		title = metadata.get('title')
+
+		title = metadata.get('title').replace('\x0D', '')
+
 		course_id = options['config'].get('course_id')
 		if not course_id:
 			course_id = " "
@@ -879,6 +898,7 @@ class videoConvert(threading.Thread):
 		avsScript = job['outputFile'] + '.avs'
 
 		self.writeAvisynth(job)
+		
 		if self.writeFFmetadata(job):
 			ffmetaFile = job['outputFile'] + '.ffmeta'
 		else:
