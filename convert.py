@@ -857,6 +857,9 @@ class videoConvert(threading.Thread):
 	def writeFFmetadata(self,options):
 		path = self.winPath(options['path'][0])
 		metadata = getMetadata(options['path'][0], unicode=True)
+
+		totalDuration = options['duration']
+
 		ffmeta  = ";FFMETADATA1\n"
 		ffmeta += "title=" + metadata.get('title') + "\n\n"
 		ffmeta += "artist=LearningLab DTU\n"
@@ -876,6 +879,10 @@ class videoConvert(threading.Thread):
 					nextseconds = int(nexttimeparts[0]) * 60 + int(nexttimeparts[1])
 
 				seconds = int(timeparts[0]) * 60 + int(timeparts[1])
+
+				if nextseconds > totalDuration or seconds > nextseconds:
+					continue
+				
 				ffmeta += "[CHAPTER]\n"
 				ffmeta += "TIMEBASE=1/1000\n"
 				ffmeta += "START=" + str(seconds*1000) + "\n"
