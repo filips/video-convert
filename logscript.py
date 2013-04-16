@@ -121,7 +121,8 @@ for basename in podcastInfo:
 			counts[str(value) + '-' + version] = podcastInfo[basename][version][value]
 			counts[str(value)] += int(podcastInfo[basename][version][value])
 	try:
-		print("Writing metadata for " + basename)
-		writeMetadata(basename + '-720p.mp4', counts)
+		if os.path.isfile(basename + '.txt'):
+			print("Writing metadata for " + basename)
+			#writeMetadata(basename + '-720p.mp4', counts)
 	except IOError:
 		print("Permission denied when writing metadata for " + basename)
