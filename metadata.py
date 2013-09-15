@@ -43,7 +43,10 @@ def getMetadata(file, unicode=False):
 def writeMetadata(file, data):
 	metafile = re.split('-\w+\.\w+$',file)[0] + ".txt"
 	if not os.path.isfile(metafile):
-		open(metafile, 'a').close()
+		try:
+			open(metafile, 'a').close()
+		except IOError:
+			return False
 	if os.path.isfile(metafile):
 		with open(metafile, 'r') as f:
 			fcntl.flock(f, fcntl.LOCK_SH)
