@@ -312,10 +312,13 @@ def checkFiles(force=False):
                                 if not versionExists(file, localSuffix, preset.get('suffix')):
                                     with conversionQueueLock:
                                         if not jobQueued(file, preset.get('suffix')):
-                                            log("Added " + file + " in version " + format + " to queue")
-                                            conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config, "rawSuffix": localSuffix, "priority": config['presets'][format].get('priority'), "metadata": metadata, "pubDate": datetime.datetime.strptime(metadata.get('pubDate'), "%Y-%m-%d %H:%M").strftime("%s")}
-                                            addToQueue(conversionJob)
-                                            #conversionQueue.append(conversionJob)
+                                            if not metadata.get('pubDate'):
+                                                log("Publishing date not set for file " + file, 'red')
+                                            else:
+                                                log("Added " + file + " in version " + format + " to queue")
+                                                conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config, "rawSuffix": localSuffix, "priority": config['presets'][format].get('priority'), "metadata": metadata, "pubDate": datetime.datetime.strptime(metadata.get('pubDate'), "%Y-%m-%d %H:%M").strftime("%s")}
+                                                addToQueue(conversionJob)
+                                                #conversionQueue.append(conversionJob)
                             else:
                                 log("Format '" + format + "' not found. Available ones are (" + ', '.join(format for format in config.get('presets')) + ")")
                     # Generate thumbnails if missing
