@@ -544,6 +544,20 @@ class videoConvert(threading.Thread):
 
     def cleanup(self):
         writeMetadata(self.job['path'][0], {"conversion": False})
+    
+    def generateLTOverlay(self, title, subtitle, file):
+        import Image, ImageDraw, ImageFont
+        width, height = 875, 115
+
+        font = "/home/video-convert/.fonts/NeoSansStd-Regular.otf"
+        mediumFont = "/home/video-convert/.fonts/NeoSansStd-Medium.otf"
+
+        textcolor = (27,65,132,255)
+        strings = []
+        strings.append([(10, 15), title, textcolor, 40, font])
+        strings.append([(15, 65), subtitle, textcolor, 32, mediumFont])
+
+        self.drawText((width, height), strings).save(file)
 
     def generateIntroOverlay(self, title, course, date,file, color):
         import Image, ImageDraw, ImageFont
@@ -754,6 +768,12 @@ class videoConvert(threading.Thread):
             branding = False
             inout    = False
 
+        if metadata.get('H264ProRecorderDynamicRangeCorrection') == "true":
+            log("Applying H264 Recorder specific dynamic range correction to " + options['path'][0])
+            H264Correction = True
+        else:
+            H264Correction = False
+
         c = options['config'].get('titleColor')
         if c and len(c) == 7:
             c = options['config'].get('titleColor')
@@ -778,6 +798,17 @@ class videoConvert(threading.Thread):
         else:
             logoOverlay = defaultLogo
 
+        lowerThirdsCmd = ""
+
+        lowerThirdsData = metadata.get('lowerThirds')
+        if len(lowerThirdsData)%3 == 0:
+            for n in range(len(lowerThirdsData)/3):
+                image = scriptDir+"Konverterede/" + options['path'][1] + '-lowerThird-'+str(n)+'.png';
+                self.generateLTOverlay(lowerThirdsData[(n-1)*3+1].replace(unichr(9634),','), lowerThirdsData[(n-1)*3+2].replace(unichr(9634),','), image)
+                lowerThirdsCmd += 'content = addLowerThird(content, '+lowerThirdsData[(n-1)*3]+', "'+self.winPath(image)+'")\n'
+        else:
+            pass
+
         if title and course_id and pubdate:
             self.generateIntroOverlay(title, course_id, pubdate, scriptDir+"Konverterede/" + options['path'][1] + '-introOverlay.png', titleColor)
             self.generateOutroOverlays(producer, technician , lecturer, year, nodtubranding, scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay')
@@ -797,6 +828,7 @@ class videoConvert(threading.Thread):
                 videoList += "addVideoClip(\"" + self.winPath(options['files'][i]) + "\","+str(soff)+","+str(eoff)+")"
                 if i != len(options['files'])-1:
                     videoList += " ++ "
+
             template = template.format(
                 intro = intro, 
                 video = path, 
@@ -807,11 +839,13 @@ class videoConvert(threading.Thread):
                 introOutro=inout, 
                 brandClips=branding, 
                 videoList=videoList, 
+                correctH264Levels=H264Correction,
                 fps=fps,
                 introoverlay=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-introOverlay.png'),
                 outrooverlay1=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay1.png'),
                 outrooverlay2=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay2.png'),
-                logoOverlay=logoOverlay
+                logoOverlay=logoOverlay,
+                lowerThirdList=lowerThirdsCmd
                 )
             script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.avs', 'w')
             script.write(template.encode('latin-1', 'ignore'))

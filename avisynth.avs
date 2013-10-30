@@ -18,6 +18,7 @@ LoadCPlugin("C:\Program Files\AviSynth 2.5\plugins\ffms2.dll")
 global introOutro = {introOutro}
 global brandClips = {brandClips}
 global framerate  = {fps}
+global correctH264Levels = {correctH264Levels}
 
 introOutro ? Eval("""
 	intro = FFmpegSource2("{intro}", atrack=-1, fpsnum=framerate).ConvertToYUY2()
@@ -74,6 +75,23 @@ function overlayImage(clip base, string image, int startframe, int endframe, int
         return output
 }}
 
+function addLowerThird(clip, start, image) {{
+	overlayClip = FFmpegSource2("z:\home\video-convert\navneskilt.mov", fpsnum=framerate, threads=1)
+    frame = Round(start * framerate)
+    before = Trim(clip, 0, frame)
+    img = ImageSource(image, pixel_type="RGB32")
+
+    overlayClip = Trim(overlayClip, 0, 9) ++ Layer(Trim(overlayClip, 10, 0), img.FadeIn(10), "add", 257, 225, 555)
+
+    overlayClip = overlayClip.FadeOut(5)
+
+    olay = Overlay(Trim(clip, frame+1, frame+1+ FrameCount(overlayClip)), overlayClip, 0, 0, overlayClip.showAlpha(pixel_type="RGB32"))
+
+    after = Trim(clip, frame + FrameCount(overlayClip)+1, 0)
+    before ++ olay ++ after
+
+}}
+
 function brandClip(clip c) {{
 	logo = ImageSource("{logoOverlay}")
 	logomask = ImageSource("{logoOverlay}",pixel_type="RGB32").ShowAlpha(pixel_type="RGB32")
@@ -90,9 +108,18 @@ function addVideoClip(string s, float start, float end) {{
 }}
 
 
+content = {videoList}
+
+{lowerThirdList}
+
+correctH264Levels ? Eval("""
+	content = Levels(content, 0, 1.0, 243, 0, 255)
+""") : Eval("")
 
 introOutro ? Eval("""
-	intro ++ {videoList} ++ outro
+	output = intro ++ content ++ outro
 """) : Eval("""
-	{videoList}
+	output = content
 """)
+
+output
