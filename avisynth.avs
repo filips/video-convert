@@ -19,6 +19,7 @@ global introOutro = {introOutro}
 global brandClips = {brandClips}
 global framerate  = {fps}
 global correctH264Levels = {correctH264Levels}
+global removedFrameOffset = 0
 
 introOutro ? Eval("""
 	intro = FFmpegSource2("{intro}", atrack=-1, fpsnum=framerate).ConvertToYUY2()
@@ -110,15 +111,17 @@ function addVideoClip(string s, float start, float end) {{
 }}
 
 function removeSection(clip clip, float start, float end) {{
-    startFrame = Round(start * framerate)
-    endFrame = Round(end * framerate)
+    startFrame = Round(start * framerate) - removedFrameOffset
+    endFrame = Round(end * framerate) - removedFrameOffset
 
     startFrame > 0 ? Eval("""
-        Trim(clip, 0, Length=startFrame) ++ Trim(clip, endFrame, 0)
+        clip=Trim(clip, 0, startFrame) ++ Trim(clip, endFrame, 0)
     """) : Eval("""
-        Trim(clip, endFrame, 0)
+        clip=Trim(clip, endFrame, 0)
     """)
 	
+    removedFrameOffset = removedFrameOffset + (endFrame - startFrame)
+    clip
 }}
 
 content = {videoList}

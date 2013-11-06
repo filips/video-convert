@@ -823,7 +823,7 @@ class videoConvert(threading.Thread):
             if removeSection: 
                 if len(removeSection)%2 == 0:
                     for n in range(len(removeSection)/2):
-                        removeSections.append(float(removeSection[(n-1)*2]),float(removeSection[(n-1)*2+1]))
+                        removeSections.append({"start": float(removeSection[(n-1)*2]), "end": float(removeSection[(n-1)*2+1])})
                 else:
                     raise metadataException({"type": "Syntax error in removeSection"})
 
