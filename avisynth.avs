@@ -110,10 +110,15 @@ function addVideoClip(string s, float start, float end) {{
 }}
 
 function removeSection(clip clip, float start, float end) {{
-    startFrame = Floor(start * framerate + 1.0)
-    endFrame = Ceil(end * framerate - 1.0)
+    startFrame = Round(start * framerate)
+    endFrame = Round(end * framerate)
 
-	Trim(clip, 0, startFrame) ++ Trim(clip, endFrame, 0)
+    startFrame > 0 ? Eval("""
+        Trim(clip, 0, Length=startFrame) ++ Trim(clip, endFrame, 0)
+    """) : Eval("""
+        Trim(clip, endFrame, 0)
+    """)
+	
 }}
 
 content = {videoList}
