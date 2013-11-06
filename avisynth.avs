@@ -76,10 +76,10 @@ function overlayImage(clip base, string image, int startframe, int endframe, int
 }}
 
 function addLowerThird(clip, start, image) {{
-	overlayClip = FFmpegSource2("z:\home\video-convert\navneskilt.mov", fpsnum=framerate, threads=1)
+	overlayClip = FFmpegSource2("z:\Users\filip\navneskilt.mov", fpsnum=framerate, threads=1)
     overlayClip = Trim(overlayClip, 0, framerate*6)
     
-    frame = Round(start * framerate)
+    frame = Floor(start * framerate + 1.0)
     before = Trim(clip, 0, frame)
     img = ImageSource(image, pixel_type="RGB32")
 
@@ -110,8 +110,8 @@ function addVideoClip(string s, float start, float end) {{
 }}
 
 function removeSection(clip clip, float start, float end) {{
-	startFrame = Round(start * framerate)
-	endFrame = Round(end * framerate)
+    startFrame = Floor(start * framerate + 1.0)
+    endFrame = Ceil(end * framerate - 1.0)
 
 	Trim(clip, 0, startFrame) ++ Trim(clip, endFrame, 0)
 }}

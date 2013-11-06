@@ -25,6 +25,7 @@ import threading
 from collections import deque
 import traceback
 import pprint
+import aggdraw
 
 import Image, ImageFont, ImageDraw, ImageChops
 import gdata.youtube.service
@@ -32,28 +33,44 @@ import simplejson as json
 from termcolor import colored
 
 from metadata import getMetadata, writeMetadata
-
+import getopt
 
 ##########################################
 ########### CONSTANTS ####################
 ##########################################
 
-#NO trailing slash on podcastPath!!
-podcastPath = "/home/video-convert/podcasts"
-scriptDir = "/home/video-convert/"
-HandBrakeCLI = "/home/typothree/prefix/bin/HandBrakeCLI"
 
-queueTextFile = "/home/video-convert/podcasts/queue.html"
+#NO trailing slash on podcastPath!!
+
+podcastPath = "/Users/filip/podcasts"
+scriptDir = "/Users/filip/"
+queueTextFile = "/Users/filip/queue.html"
+
+fontDir = "/Users/filip/Library/Fonts/"
+
+#fontDir = "/home/video-convert/.fonts/"
+
+# podcastPath = "/home/video-convert/podcasts"
+# scriptDir = "/home/video-convert/"
+# HandBrakeCLI = "/home/typothree/prefix/bin/HandBrakeCLI"
+
+# queueTextFile = "/home/video-convert/podcasts/queue.html"
 
 # YouTube parameters to be passed if metadata is missing
 defaultYoutubeCategory = "Education"
 defaultYoutubeKeywords = "Education"
 
 # Default intro and outro video in case branding is specified, but no custom files are found
-defaultIntro = "z:\\home\\video-convert\\intro.mov"
-defaultOutro = "z:\\home\\video-convert\\outro.mov"
 
-defaultLogo = "z:\\home\\video-convert\\dtulogo.png"
+defaultIntro = "z:\\Users\\filip\\intro.mov"
+defaultOutro = "z:\\Users\\filip\\outro.mov"
+
+defaultLogo = "z:\\Users\\filip\\dtulogo.png"
+
+#defaultIntro = "z:\\home\\video-convert\\intro.mov"
+#defaultOutro = "z:\\home\\video-convert\\outro.mov"
+
+#defaultLogo = "z:\\home\\video-convert\\dtulogo.png"
 
 rawSuffix = "raw" # Used to be 720p
 
@@ -87,6 +104,14 @@ scanInterval = 60
 locale.setlocale(locale.LC_ALL, "da_DK.UTF-8")
 
 ## INTERNAL ##
+
+opts, args = getopt.getopt(sys.argv[1:],'',["dry-run"])
+
+dryrun = False
+for opt, arg in opts:
+    if opt == "--dry-run":
+        dryrun = True
+
 
 # Don't change
 logging = True
@@ -165,8 +190,9 @@ def saveQueueText():
     </body>
 </html>
     """
-    with open(queueTextFile, 'w') as f:
-        f.write(accum)
+    if queueTextFile:
+        with open(queueTextFile, 'w') as f:
+            f.write(accum)
 
 def scanStructure():
     _structure = {}
@@ -493,6 +519,8 @@ class videoConvert(threading.Thread):
         startOffset = self.job['metadata'].get('startOffset')
         endOffset   = self.job['metadata'].get('endOffset')
         
+        self.job['originalDuration'] = []
+
         for key in self.job['files']:
             info = self.videoInfo(element['files'][key])
             if not info:
@@ -509,8 +537,9 @@ class videoConvert(threading.Thread):
             except (IndexError, TypeError):
                 eoff = 0.0
             
-            self.job['duration'] += float(info['length']) - float(soff) - float(eoff)
+            self.job['originalDuration'].append(float(info['length']))
 
+            self.job['duration'] += float(info['length']) - float(soff) - float(eoff)
             numStreams = info['videoStreams']
             width, height = info['width'], info['height']
             if (width, height) != (1280, 720):
@@ -554,13 +583,13 @@ class videoConvert(threading.Thread):
         import Image, ImageDraw, ImageFont
         width, height = 875, 115
 
-        font = "/home/video-convert/.fonts/NeoSansStd-Regular.otf"
-        mediumFont = "/home/video-convert/.fonts/NeoSansStd-Medium.otf"
+        font = os.path.join(fontDir, "NeoSansStd-Regular.otf")
+        mediumFont = os.path.join(fontDir, "NeoSansStd-Medium.otf")
 
         textcolor = (27,65,132,255)
         strings = []
         strings.append([(10, 15), title, textcolor, 40, font])
-        strings.append([(15, 65), subtitle, textcolor, 32, mediumFont])
+        strings.append([(10, 65), subtitle, textcolor, 32, mediumFont])
 
         self.drawText((width, height), strings).save(file)
 
@@ -572,9 +601,9 @@ class videoConvert(threading.Thread):
 
         img = Image.new("RGBA", (width, height), (0,0,0,0))
         draw = ImageDraw.Draw(img)
-        titleFont = "/home/video-convert/.fonts/NeoSansStd-Medium.otf"
+        titleFont = os.path.join(fontDir, "NeoSansStd-Medium.otf")
         titleFontEl = ImageFont.truetype(titleFont, 40, encoding='unic')
-        regularFont = "/home/video-convert//.fonts/NeoSansStd-Regular.otf"
+        regularFont = os.path.join(fontDir, "NeoSansStd-Regular.otf")
 
         titleSize = titleFontEl.getsize(title)
 
@@ -618,7 +647,7 @@ class videoConvert(threading.Thread):
         width, height = 1280, 720
         titleOffsetX = 340
 
-        font = "/home/video-convert/.fonts/NeoSansStd-Regular.otf"
+        font = os.path.join(fontDir, "NeoSansStd-Regular.otf")
         fontsize = 44
         textcolor = (164,164,164,255)
 
@@ -655,16 +684,23 @@ class videoConvert(threading.Thread):
         
         for pos, text, color, size, font in strings:
             imtext = Image.new("L", imsize, 0)
-            draw = ImageDraw.Draw(imtext)
-            font = ImageFont.truetype(font, size, encoding='unic')
+            # draw = ImageDraw.Draw(imtext)
+            # font = ImageFont.truetype(font, size, encoding='unic')
+
+            draw = aggdraw.Draw(imtext)
+            font = aggdraw.Font((255,255,255), font, size=size)
+            
             (offset_x, offset_y) = pos
+            
             if offset_x < 0:
-                offset_x = imsize[0] - font.getsize(text)[0] + pos[0]
+                offset_x = imsize[0] - draw.textsize(text, font)[0] + pos[0]
             if offset_y < 0:
                 pass
-                offset_y = imsize[1] - font.getsize(text)[1] + pos[1]
+                offset_y = imsize[1] - draw.textsize(text, font)[1] + pos[1]
 
-            draw.text((offset_x, offset_y), text, font=font, fill="white")
+            # draw.text((offset_x, offset_y), text, font=font, fill="white")
+            draw.text((offset_x, offset_y), text, font)
+            draw.flush()
 
             alpha = ImageChops.lighter(alpha, imtext)
             solidcolor = Image.new("RGBA", imsize, color)
@@ -703,6 +739,7 @@ class videoConvert(threading.Thread):
         try:
             numStreams = int(videoConvert.executeCommand("ffprobe \""+file+"\" 2>&1 | awk '/Stream .+ Video.*1280x720/{print $0}' | wc -l"))
             metaData = videoConvert.executeCommand("exiftool \""+file+"\"")
+
             info = {}
             for line in metaData.splitlines():
                 key, value = [x.strip() for x in line.split(" : ")]
@@ -717,7 +754,6 @@ class videoConvert(threading.Thread):
                 else:
                     hours = length[0]
                 secs = int(hours) * 3600 + int(length[-2]) * 60 + int(length[-1])
-
             videoinfo = {
                 "videoStreams": numStreams,
                 "height": int(info['Image Height']),
@@ -737,13 +773,19 @@ class videoConvert(threading.Thread):
         return wineDrive + ":" + unix_path.replace("/","\\")
 
 
-    def correctedTime(self, time, removedSections, inTime, outTime):
-        pass
+    def getCorrectedTime(self, time, remSecs):
+        newTime = time
+        for remSec in remSecs:
+            if time >= remSec['end']:
+                newTime -= remSec['end'] - remSec['start']
+            elif time > remSec['start']:
+                return None
+        return newTime
 
     # Write avisynth script
     def writeAvisynth(self,options):
         path = self.winPath(options['path'][0])
-        #path = self.winPath(options['newInput'])
+
         metadata = getMetadata(options['path'][0], unicode=True)
         if metadata == False:
             raise metadataException({"type": "No metadata file found!!"})
@@ -769,6 +811,72 @@ class videoConvert(threading.Thread):
 
         startOffset = metadata.get('startOffset')
         endOffset   = metadata.get('endOffset')
+
+        removeSectionCmd = ""
+        lowerThirdsCmd = ""
+        
+        if len(options['files']) == 1:
+            removeSections = []
+            duration = float(options['originalDuration'][0])
+
+            removeSection = metadata.get('removeSection')
+            if removeSection: 
+                if len(removeSection)%2 == 0:
+                    for n in range(len(removeSection)/2):
+                        removeSections.append(float(removeSection[(n-1)*2]),float(removeSection[(n-1)*2+1]))
+                else:
+                    raise metadataException({"type": "Syntax error in removeSection"})
+
+            # In/out times for the first video file.
+            try:
+                inTime = float(startOffset[0])
+            except (IndexError, TypeError) as e:
+                inTime = 0.0
+            try:
+                outTime = float(endOffset[0])
+            except (IndexError, TypeError):
+                outTime = 0.0
+
+            removeSections.append({"start": 0.0, "end": inTime})
+            removeSections.append({"start": duration - outTime, "end": duration})
+            removeSections.sort(key=lambda x: x['start'])
+
+            newRemoveSections = []
+
+            for remSec in enumerate(removeSections):
+                if remSec[1]['start'] < 0.0:
+                    remSec[1]['start'] = 0.0
+                if remSec[1]['end'] > duration:
+                    remSec[1]['end'] = duration
+                if remSec[1]['start'] > duration or remSec[1]['end'] < 0.0 or remSec[1]['start']==remSec[1]['end']:
+                    continue
+                
+                if len(newRemoveSections) == 0:
+                    newRemoveSections.append(remSec[1])
+                else:
+                    if remSec[1]['start'] <= newRemoveSections[-1]['end']:
+                        newRemoveSections[-1]['end'] = remSec[1]['end']
+                    else:
+                        newRemoveSections.append(remSec[1])
+
+                for remSec in newRemoveSections:
+                        removeSectionCmd += 'content = removeSection(content, '+str(remSec['start'])+', '+str(remSec['end'])+')\n'
+
+            lowerThirdsData = metadata.get('lowerThirds')
+            if lowerThirdsData:
+                if len(lowerThirdsData)%3 == 0:
+                    for n in range(len(lowerThirdsData)/3):
+                        image = scriptDir+"Konverterede/" + options['path'][1] + '-lowerThird-'+str(n)+'.png';
+                        self.generateLTOverlay(lowerThirdsData[(n-1)*3+1].replace(unichr(9634),','), lowerThirdsData[(n-1)*3+2].replace(unichr(9634),','), image)
+                        newTime = self.getCorrectedTime(float(lowerThirdsData[(n-1)*3]), newRemoveSections)
+                        if newTime != None:
+                            lowerThirdsCmd += 'content = addLowerThird(content, '+str(newTime)+', "'+self.winPath(image)+'")\n'
+                        else: 
+                            log("Ignoring lowerthird at " + str(lowerThirdsData[(n-1)*3]) + "s : Invalid time!", 'blue')
+                else:
+                    raise metadataException({"type": "Syntax error in lowerThird declaration"})
+
+
 
         if options['config'].get('branding') == True:
             branding = True
@@ -807,27 +915,6 @@ class videoConvert(threading.Thread):
         else:
             logoOverlay = defaultLogo
 
-        lowerThirdsCmd = ""
-
-        lowerThirdsData = metadata.get('lowerThirds')
-        if lowerThirdsData:
-            if len(lowerThirdsData)%3 == 0:
-                for n in range(len(lowerThirdsData)/3):
-                    image = scriptDir+"Konverterede/" + options['path'][1] + '-lowerThird-'+str(n)+'.png';
-                    self.generateLTOverlay(lowerThirdsData[(n-1)*3+1].replace(unichr(9634),','), lowerThirdsData[(n-1)*3+2].replace(unichr(9634),','), image)
-                    lowerThirdsCmd += 'content = addLowerThird(content, '+lowerThirdsData[(n-1)*3]+', "'+self.winPath(image)+'")\n'
-            else:
-                raise metadataException({"type": "Syntax error in lowerThird declaration"})
-
-        removeSectionCmd = ""
-        removeSection = metadata.get('removeSection')
-        if removeSection: 
-            if len(removeSection)%2 == 0:
-                for n in range(len(removeSection)/2):
-                    removeSectionCmd += 'content = removeSection(content, '+removeSection[(n-1)*2]+', '+removeSection[(n-1)*2+1]+')\n'
-            else:
-                raise metadataException({"type": "Syntax error in removeSection"})
-
         if title and course_id and pubdate:
             self.generateIntroOverlay(title, course_id, pubdate, scriptDir+"Konverterede/" + options['path'][1] + '-introOverlay.png', titleColor)
             self.generateOutroOverlays(producer, technician , lecturer, year, nodtubranding, scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay')
@@ -844,7 +931,10 @@ class videoConvert(threading.Thread):
                 except (IndexError, TypeError):
                     eoff = 0
 
-                videoList += "addVideoClip(\"" + self.winPath(options['files'][i]) + "\","+str(soff)+","+str(eoff)+")"
+                if len(options['files']) > 1:
+                    videoList += "addVideoClip(\"" + self.winPath(options['files'][i]) + "\","+str(soff)+","+str(eoff)+")"
+                else:
+                     videoList += "addVideoClip(\"" + self.winPath(options['files'][i]) + "\", 0.0, 0.0)"
                 if i != len(options['files'])-1:
                     videoList += " ++ "
 
@@ -984,7 +1074,7 @@ class videoConvert(threading.Thread):
         newlist = {}
         for key in job['files']:
             file = job['files'][key]
-            self.executeCommand("yes | ffmpeg -i " + file + " -acodec copy -vcodec copy " + file + ".new.m4v")
+            self.executeCommand("ffmpeg -i " + file + " -acodec copy -vcodec copy " + file + ".new.m4v -y")
             newlist[key] = file + ".new.m4v"
         
         #pp = pprint.PrettyPrinter()
@@ -1005,9 +1095,9 @@ class videoConvert(threading.Thread):
             #log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
             log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -", niceness=True, includeStderr=True)
             if ffmetaFile:
-                log += self.executeCommand("yes | ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -i \"" +ffmetaFile+ "\" -map_metadata 2 -vcodec copy -strict -2 \""+outputFile+"\"", niceness=True, includeStderr=True)
+                log += self.executeCommand("ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -i \"" +ffmetaFile+ "\" -map_metadata 2 -vcodec copy -strict -2 \""+outputFile+"\" -y", niceness=True, includeStderr=True)
             else:
-                log += self.executeCommand("yes | ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\"", niceness=True, includeStderr=True)
+                log += self.executeCommand("ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\" -y", niceness=True, includeStderr=True)
         except Exception:
             raise
         finally:
