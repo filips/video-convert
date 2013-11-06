@@ -77,6 +77,8 @@ function overlayImage(clip base, string image, int startframe, int endframe, int
 
 function addLowerThird(clip, start, image) {{
 	overlayClip = FFmpegSource2("z:\home\video-convert\navneskilt.mov", fpsnum=framerate, threads=1)
+    overlayClip = Trim(overlayClip, 0, framerate*6)
+    
     frame = Round(start * framerate)
     before = Trim(clip, 0, frame)
     img = ImageSource(image, pixel_type="RGB32")
@@ -107,8 +109,16 @@ function addVideoClip(string s, float start, float end) {{
 	ResampleAudio(clip, 48000)
 }}
 
+function removeSection(clip clip, float start, float end) {{
+	startFrame = Round(start * framerate)
+	endFrame = Round(end * framerate)
+
+	Trim(clip, 0, startFrame) ++ Trim(clip, endFrame, 0)
+}}
 
 content = {videoList}
+
+{removeSection}
 
 {lowerThirdList}
 

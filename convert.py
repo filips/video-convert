@@ -316,8 +316,13 @@ def checkFiles(force=False):
                                                 log("Publishing date not set for file " + file, 'red')
                                             else:
                                                 log("Added " + file + " in version " + format + " to queue")
-                                                conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config, "rawSuffix": localSuffix, "priority": config['presets'][format].get('priority'), "metadata": metadata, "pubDate": datetime.datetime.strptime(metadata.get('pubDate'), "%Y-%m-%d %H:%M").strftime("%s")}
-                                                addToQueue(conversionJob)
+                                                try:
+                                                    timeValue = datetime.datetime.strptime(metadata.get('pubDate'), "%Y-%m-%d %H:%M").strftime("%s")
+                                                except ValueError:
+                                                    log("Invalid time format in " + file, 'red')
+                                                else:
+                                                    conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config, "rawSuffix": localSuffix, "priority": config['presets'][format].get('priority'), "metadata": metadata, "pubDate": timeValue}
+                                                    addToQueue(conversionJob)
                                                 #conversionQueue.append(conversionJob)
                             else:
                                 log("Format '" + format + "' not found. Available ones are (" + ', '.join(format for format in config.get('presets')) + ")")
@@ -731,13 +736,17 @@ class videoConvert(threading.Thread):
     def winPath(self, unix_path):
         return wineDrive + ":" + unix_path.replace("/","\\")
 
+
+    def correctedTime(self, time, removedSections, inTime, outTime):
+        pass
+
     # Write avisynth script
     def writeAvisynth(self,options):
         path = self.winPath(options['path'][0])
         #path = self.winPath(options['newInput'])
         metadata = getMetadata(options['path'][0], unicode=True)
         if metadata == False:
-            raise metadataException
+            raise metadataException({"type": "No metadata file found!!"})
 
         title = metadata.get('title').replace('\x0D', '')
 
@@ -801,13 +810,23 @@ class videoConvert(threading.Thread):
         lowerThirdsCmd = ""
 
         lowerThirdsData = metadata.get('lowerThirds')
-        if len(lowerThirdsData)%3 == 0:
-            for n in range(len(lowerThirdsData)/3):
-                image = scriptDir+"Konverterede/" + options['path'][1] + '-lowerThird-'+str(n)+'.png';
-                self.generateLTOverlay(lowerThirdsData[(n-1)*3+1].replace(unichr(9634),','), lowerThirdsData[(n-1)*3+2].replace(unichr(9634),','), image)
-                lowerThirdsCmd += 'content = addLowerThird(content, '+lowerThirdsData[(n-1)*3]+', "'+self.winPath(image)+'")\n'
-        else:
-            pass
+        if lowerThirdsData:
+            if len(lowerThirdsData)%3 == 0:
+                for n in range(len(lowerThirdsData)/3):
+                    image = scriptDir+"Konverterede/" + options['path'][1] + '-lowerThird-'+str(n)+'.png';
+                    self.generateLTOverlay(lowerThirdsData[(n-1)*3+1].replace(unichr(9634),','), lowerThirdsData[(n-1)*3+2].replace(unichr(9634),','), image)
+                    lowerThirdsCmd += 'content = addLowerThird(content, '+lowerThirdsData[(n-1)*3]+', "'+self.winPath(image)+'")\n'
+            else:
+                raise metadataException({"type": "Syntax error in lowerThird declaration"})
+
+        removeSectionCmd = ""
+        removeSection = metadata.get('removeSection')
+        if removeSection: 
+            if len(removeSection)%2 == 0:
+                for n in range(len(removeSection)/2):
+                    removeSectionCmd += 'content = removeSection(content, '+removeSection[(n-1)*2]+', '+removeSection[(n-1)*2+1]+')\n'
+            else:
+                raise metadataException({"type": "Syntax error in removeSection"})
 
         if title and course_id and pubdate:
             self.generateIntroOverlay(title, course_id, pubdate, scriptDir+"Konverterede/" + options['path'][1] + '-introOverlay.png', titleColor)
@@ -845,14 +864,15 @@ class videoConvert(threading.Thread):
                 outrooverlay1=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay1.png'),
                 outrooverlay2=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay2.png'),
                 logoOverlay=logoOverlay,
-                lowerThirdList=lowerThirdsCmd
+                lowerThirdList=lowerThirdsCmd,
+                removeSection=removeSectionCmd
                 )
             script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.avs', 'w')
             script.write(template.encode('latin-1', 'ignore'))
             script.close
             return template
         else:
-            raise metadataException({"type": "missingMetadata"})
+            raise metadataException({"type": "Either title, course_id or pubdate missing"})
 
     def handleConversionJob(self,conversionJob):
         rawFiles = conversionJob['files']
@@ -886,7 +906,7 @@ class videoConvert(threading.Thread):
                 log("Job consists of " + str(len(rawFiles)) + " raw files")
                 convertLog = self.avisynthConversion(conversionJob)
         except metadataException as e:
-            log("Missing metadata for file " + rawFiles[0], 'red')
+            log("Error '"+e[0]['type']+"' for file " + rawFiles[0], 'red')
             return False
         except executeException as e:
             print "error"
