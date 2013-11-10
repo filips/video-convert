@@ -42,19 +42,19 @@ import getopt
 
 #NO trailing slash on podcastPath!!
 
-podcastPath = "/Users/filip/podcasts"
-scriptDir = "/Users/filip/"
-queueTextFile = "/Users/filip/queue.html"
+#podcastPath = "/Users/filip/podcasts"
+#scriptDir = "/Users/filip/"
+#queueTextFile = "/Users/filip/queue.html"
 
-fontDir = "/Users/filip/Library/Fonts/"
+#fontDir = "/Users/filip/Library/Fonts/"
 
-#fontDir = "/home/video-convert/.fonts/"
+fontDir = "/home/video-convert/.fonts/"
 
-# podcastPath = "/home/video-convert/podcasts"
-# scriptDir = "/home/video-convert/"
-# HandBrakeCLI = "/home/typothree/prefix/bin/HandBrakeCLI"
+podcastPath = "/home/video-convert/podcasts"
+scriptDir = "/home/video-convert/"
+HandBrakeCLI = "/home/typothree/prefix/bin/HandBrakeCLI"
 
-# queueTextFile = "/home/video-convert/podcasts/queue.html"
+queueTextFile = "/home/video-convert/podcasts/queue.html"
 
 # YouTube parameters to be passed if metadata is missing
 defaultYoutubeCategory = "Education"
@@ -62,15 +62,15 @@ defaultYoutubeKeywords = "Education"
 
 # Default intro and outro video in case branding is specified, but no custom files are found
 
-defaultIntro = "z:\\Users\\filip\\intro.mov"
-defaultOutro = "z:\\Users\\filip\\outro.mov"
+#defaultIntro = "z:\\Users\\filip\\intro.mov"
+#defaultOutro = "z:\\Users\\filip\\outro.mov"
 
-defaultLogo = "z:\\Users\\filip\\dtulogo.png"
+#defaultLogo = "z:\\Users\\filip\\dtulogo.png"
 
-#defaultIntro = "z:\\home\\video-convert\\intro.mov"
-#defaultOutro = "z:\\home\\video-convert\\outro.mov"
+defaultIntro = "z:\\home\\video-convert\\intro.mov"
+defaultOutro = "z:\\home\\video-convert\\outro.mov"
 
-#defaultLogo = "z:\\home\\video-convert\\dtulogo.png"
+defaultLogo = "z:\\home\\video-convert\\dtulogo.png"
 
 rawSuffix = "raw" # Used to be 720p
 
@@ -848,7 +848,7 @@ class videoConvert(threading.Thread):
                     remSec[1]['start'] = 0.0
                 if remSec[1]['end'] > duration:
                     remSec[1]['end'] = duration
-                if remSec[1]['start'] > duration or remSec[1]['end'] < 0.0 or remSec[1]['start']==remSec[1]['end']:
+                if remSec[1]['start'] > duration or remSec[1]['end'] < 0.0 or remSec[1]['start']==remSec[1]['end'] or remSec[1]['end'] == 0.0 or remSec[1] in newRemoveSections:
                     continue
                 
                 if len(newRemoveSections) == 0:
@@ -859,8 +859,8 @@ class videoConvert(threading.Thread):
                     else:
                         newRemoveSections.append(remSec[1])
 
-                for remSec in newRemoveSections:
-                        removeSectionCmd += 'content = removeSection(content, '+str(remSec['start'])+', '+str(remSec['end'])+')\n'
+            for remSec in newRemoveSections:
+                    removeSectionCmd += 'content = removeSection(content, '+str(remSec['start'])+', '+str(remSec['end'])+')\n'
 
             lowerThirdsData = metadata.get('lowerThirds')
             if lowerThirdsData:

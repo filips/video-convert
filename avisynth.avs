@@ -77,7 +77,7 @@ function overlayImage(clip base, string image, int startframe, int endframe, int
 }}
 
 function addLowerThird(clip, start, image) {{
-	overlayClip = FFmpegSource2("z:\Users\filip\navneskilt.mov", fpsnum=framerate, threads=1)
+	overlayClip = FFmpegSource2("z:\home\video-convert\navneskilt.mov", fpsnum=framerate, threads=1)
     overlayClip = Trim(overlayClip, 0, framerate*6)
     
     frame = Floor(start * framerate + 1.0)
