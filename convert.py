@@ -332,10 +332,13 @@ def checkFiles(force=False):
                                     youtubeUpload.addToQueue(filename, youtube.copy())
                     # Check if videos are to be converted
                     if config.get("convert") == True:
+                        reconverting = metadata.get('reconvert') == "true"
                         for format in config.get('formats'):
                             preset = config.get('presets').get(format)
                             if preset:
-                                if not versionExists(file, localSuffix, preset.get('suffix')):
+                                if not versionExists(file, localSuffix, preset.get('suffix')) or reconverting:
+                                    if reconverting:
+                                        log("Reconverting file " + file, 'yellow')
                                     with conversionQueueLock:
                                         if not jobQueued(file, preset.get('suffix')):
                                             if not metadata.get('pubDate'):
@@ -347,11 +350,17 @@ def checkFiles(force=False):
                                                 except ValueError:
                                                     log("Invalid time format in " + file, 'red')
                                                 else:
-                                                    conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config, "rawSuffix": localSuffix, "priority": config['presets'][format].get('priority'), "metadata": metadata, "pubDate": timeValue}
-                                                    addToQueue(conversionJob)
-                                                #conversionQueue.append(conversionJob)
+                                                    priority = int(config['presets'][format].get('priority'))
+                                                    # Reduce priority for reconversions.
+                                                    if reconverting:
+                                                        priority -= 1000
+                                                    
+                                                    conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config, "rawSuffix": localSuffix, "priority": priority, "metadata": metadata, "pubDate": timeValue}
+                                                    addToQueue(conversionJob)      
                             else:
                                 log("Format '" + format + "' not found. Available ones are (" + ', '.join(format for format in config.get('presets')) + ")")
+                        if metadata.get('reconvert'):
+                            writeMetadata(data[0], {"reconvert": False})
                     # Generate thumbnails if missing
                     thumbnail = re.sub("-" + localSuffix + "\.(" + "|".join(fileTypes) + ")", "-1.png", file)
                     if not os.path.isfile(thumbnail):
@@ -401,7 +410,7 @@ def isRunning():
             raise IOError
         else:
             cmdline = open('/proc/' + str(pid) + '/cmdline','r').readline().strip("\0")
-            if cmdline.endswith(sys.argv[0]):
+            if sys.argv[0] in cmdline:
                 return True
             else:
                 raise IOError
@@ -976,7 +985,7 @@ class videoConvert(threading.Thread):
         conversionJob['outputFile'] = scriptDir+"Konverterede/" + conversionJob['path'][1] + "-"+ conversionJob['options']['suffix']
         outputFile = conversionJob['outputFile']
         finalDestination = re.sub(conversionJob['rawSuffix']+"\..+", conversionJob['options']['suffix'] + ".m4v",conversionJob['path'][0])
-        if os.path.isfile(finalDestination):
+        if os.path.isfile(finalDestination) and not conversionJob['metadata'].get('reconvert') == "true":
             log("File " + finalDestination + " already exists!")
             return False
         success = False
