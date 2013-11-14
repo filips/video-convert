@@ -42,19 +42,20 @@ import getopt
 
 #NO trailing slash on podcastPath!!
 
-#podcastPath = "/Users/filip/podcasts"
-#scriptDir = "/Users/filip/"
-#queueTextFile = "/Users/filip/queue.html"
+podcastPath = "/Users/filip/podcasts"
+scriptDir = "/Users/filip/"
+queueTextFile = "/Users/filip/queue.html"
 
-#fontDir = "/Users/filip/Library/Fonts/"
+fontDir = "/Users/filip/Library/Fonts/"
+nametagPath = "z:\\Users\\filip\\navneskilt.mov"
 
-fontDir = "/home/video-convert/.fonts/"
+#fontDir = "/home/video-convert/.fonts/"
 
-podcastPath = "/home/video-convert/podcasts"
-scriptDir = "/home/video-convert/"
-HandBrakeCLI = "/home/typothree/prefix/bin/HandBrakeCLI"
+# podcastPath = "/home/video-convert/podcasts"
+# scriptDir = "/home/video-convert/"
+# HandBrakeCLI = "/home/typothree/prefix/bin/HandBrakeCLI"
 
-queueTextFile = "/home/video-convert/podcasts/queue.html"
+# queueTextFile = "/home/video-convert/podcasts/queue.html"
 
 # YouTube parameters to be passed if metadata is missing
 defaultYoutubeCategory = "Education"
@@ -62,15 +63,16 @@ defaultYoutubeKeywords = "Education"
 
 # Default intro and outro video in case branding is specified, but no custom files are found
 
-#defaultIntro = "z:\\Users\\filip\\intro.mov"
-#defaultOutro = "z:\\Users\\filip\\outro.mov"
+defaultIntro = "z:\\Users\\filip\\intro.mov"
+defaultOutro = "z:\\Users\\filip\\outro.mov"
 
-#defaultLogo = "z:\\Users\\filip\\dtulogo.png"
+defaultLogo = "z:\\Users\\filip\\dtulogo.png"
 
-defaultIntro = "z:\\home\\video-convert\\intro.mov"
-defaultOutro = "z:\\home\\video-convert\\outro.mov"
+# defaultIntro = "z:\\home\\video-convert\\intro.mov"
+# defaultOutro = "z:\\home\\video-convert\\outro.mov"
 
-defaultLogo = "z:\\home\\video-convert\\dtulogo.png"
+# defaultLogo = "z:\\home\\video-convert\\dtulogo.png"
+# nametagPath = "z:\\home\\video-convert\\navneskilt.mov"
 
 rawSuffix = "raw" # Used to be 720p
 
@@ -519,71 +521,74 @@ class videoConvert(threading.Thread):
         self.job = conversionJob
         self.currentlyConverting = self.job['path'][0]
     def run(self):
-        error = False
-        writeMetadata(self.job['path'][0], {"conversion": "active"})
-        resolutionError = False
+        try:
+            error = False
+            writeMetadata(self.job['path'][0], {"conversion": "active"})
+            resolutionError = False
 
-        self.job['duration'] = 0.0
+            self.job['duration'] = 0.0
 
-        startOffset = self.job['metadata'].get('startOffset')
-        endOffset   = self.job['metadata'].get('endOffset')
-        
-        self.job['originalDuration'] = []
-
-        for key in self.job['files']:
-            info = self.videoInfo(element['files'][key])
-            if not info:
-                error = True
-                log("Error getting video info for " + self.job['files'][key], "red")
-                break
-
-            try:
-                soff = startOffset[key]
-            except (IndexError, TypeError) as e:
-                soff = 0.0
-            try:
-                eoff = endOffset[key]
-            except (IndexError, TypeError):
-                eoff = 0.0
+            startOffset = self.job['metadata'].get('startOffset')
+            endOffset   = self.job['metadata'].get('endOffset')
             
-            self.job['originalDuration'].append(float(info['length']))
+            self.job['originalDuration'] = []
 
-            self.job['duration'] += float(info['length']) - float(soff) - float(eoff)
-            numStreams = info['videoStreams']
-            width, height = info['width'], info['height']
-            if (width, height) != (1280, 720):
-                log("Videofile " + self.job['files'][key] + " has resolution " + str(width) + "x" + str(height) + " and was quarantined!", 'red')
-                writeMetadata(self.job['path'][0], {"quarantine": "true"})
-                resolutionError = True
-        if not resolutionError and not error:
-            if numStreams == 1:
-                if self.handleConversionJob(self.job):
-
-                    writeMetadata(element['path'][0], {"conversion": False})
-
-                    # Adding job to youtubeUpload's queue. Should probably be handled by a watcher thread instead
-                    youtubeConfig = self.job['config'].get("youtube")
-                    destination = re.sub(self.job['rawSuffix'], self.job['options']['suffix'],self.job['path'][0])
-
-                    if youtubeConfig and self.job['config'].get('youtubeUpload') == True:
-                        if self.job.get("preset") == youtubeConfig.get("uploadVersion"):
-                            destination = destination[:-3] + "m4v"
-                            youtubeUpload.addToQueue(destination, youtubeConfig)
-                else:
+            for key in self.job['files']:
+                info = self.videoInfo(element['files'][key])
+                if not info:
                     error = True
-                    if self.job['config'].get("contactEmail"):
-                        sendErrorReport(self.job['path'][0], self.job['config'].get('contactEmail'))
-            elif numStreams == False:
-                log("Couldn't get video information for " + self.job['path'][0] + " , skipping!")
-                error = True
-            else:
-                log("Video contains " + str(numStreams) + " videostrems, and was quarantined! ("+self.job['path'][0]+")", 'red')
-                writeMetadata(self.job['path'][0], {"quarantine": "true"})
-                error = True
+                    log("Error getting video info for " + self.job['files'][key], "red")
+                    break
 
-        if error or resolutionError:
-            writeMetadata(self.job['path'][0], {"conversion": "failed", "quarantine": "true"})
-        self.currentlyConverting = False
+                try:
+                    soff = startOffset[key]
+                except (IndexError, TypeError) as e:
+                    soff = 0.0
+                try:
+                    eoff = endOffset[key]
+                except (IndexError, TypeError):
+                    eoff = 0.0
+                
+                self.job['originalDuration'].append(float(info['length']))
+
+                self.job['duration'] += float(info['length']) - float(soff) - float(eoff)
+                numStreams = info['videoStreams']
+                width, height = info['width'], info['height']
+                if (width, height) != (1280, 720):
+                    log("Videofile " + self.job['files'][key] + " has resolution " + str(width) + "x" + str(height) + " and was quarantined!", 'red')
+                    writeMetadata(self.job['path'][0], {"quarantine": "true"})
+                    resolutionError = True
+            if not resolutionError and not error:
+                if numStreams == 1:
+                    if self.handleConversionJob(self.job):
+
+                        writeMetadata(element['path'][0], {"conversion": False})
+
+                        # Adding job to youtubeUpload's queue. Should probably be handled by a watcher thread instead
+                        youtubeConfig = self.job['config'].get("youtube")
+                        destination = re.sub(self.job['rawSuffix'], self.job['options']['suffix'],self.job['path'][0])
+
+                        if youtubeConfig and self.job['config'].get('youtubeUpload') == True:
+                            if self.job.get("preset") == youtubeConfig.get("uploadVersion"):
+                                destination = destination[:-3] + "m4v"
+                                youtubeUpload.addToQueue(destination, youtubeConfig)
+                    else:
+                        error = True
+                        if self.job['config'].get("contactEmail"):
+                            sendErrorReport(self.job['path'][0], self.job['config'].get('contactEmail'))
+                elif numStreams == False:
+                    log("Couldn't get video information for " + self.job['path'][0] + " , skipping!")
+                    error = True
+                else:
+                    log("Video contains " + str(numStreams) + " videostrems, and was quarantined! ("+self.job['path'][0]+")", 'red')
+                    writeMetadata(self.job['path'][0], {"quarantine": "true"})
+                    error = True
+
+            if error or resolutionError:
+                writeMetadata(self.job['path'][0], {"conversion": "failed", "quarantine": "true"})
+            self.currentlyConverting = False
+        except:
+            log(traceback.format_exc(), 'red')
 
     def cleanup(self):
         writeMetadata(self.job['path'][0], {"conversion": False})
@@ -964,7 +969,8 @@ class videoConvert(threading.Thread):
                 outrooverlay2=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay2.png'),
                 logoOverlay=logoOverlay,
                 lowerThirdList=lowerThirdsCmd,
-                removeSection=removeSectionCmd
+                removeSection=removeSectionCmd,
+                nametag=nametagPath
                 )
             script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.avs', 'w')
             script.write(template.encode('latin-1', 'ignore'))
