@@ -42,20 +42,20 @@ import getopt
 
 #NO trailing slash on podcastPath!!
 
-podcastPath = "/Users/filip/podcasts"
-scriptDir = "/Users/filip/"
-queueTextFile = "/Users/filip/queue.html"
+#podcastPath = "/Users/filip/podcasts"
+#scriptDir = "/Users/filip/"
+#queueTextFile = "/Users/filip/queue.html"
 
-fontDir = "/Users/filip/Library/Fonts/"
-nametagPath = "z:\\Users\\filip\\navneskilt.mov"
+#fontDir = "/Users/filip/Library/Fonts/"
+#nametagPath = "z:\\Users\\filip\\navneskilt.mov"
 
-#fontDir = "/home/video-convert/.fonts/"
+fontDir = "/home/video-convert/.fonts/"
 
-# podcastPath = "/home/video-convert/podcasts"
-# scriptDir = "/home/video-convert/"
-# HandBrakeCLI = "/home/typothree/prefix/bin/HandBrakeCLI"
+podcastPath = "/home/video-convert/podcasts"
+scriptDir = "/home/video-convert/"
+HandBrakeCLI = "/home/typothree/prefix/bin/HandBrakeCLI"
 
-# queueTextFile = "/home/video-convert/podcasts/queue.html"
+queueTextFile = "/home/video-convert/podcasts/queue.html"
 
 # YouTube parameters to be passed if metadata is missing
 defaultYoutubeCategory = "Education"
@@ -63,16 +63,16 @@ defaultYoutubeKeywords = "Education"
 
 # Default intro and outro video in case branding is specified, but no custom files are found
 
-defaultIntro = "z:\\Users\\filip\\intro.mov"
-defaultOutro = "z:\\Users\\filip\\outro.mov"
+#defaultIntro = "z:\\Users\\filip\\intro.mov"
+#defaultOutro = "z:\\Users\\filip\\outro.mov"
 
-defaultLogo = "z:\\Users\\filip\\dtulogo.png"
+#defaultLogo = "z:\\Users\\filip\\dtulogo.png"
 
-# defaultIntro = "z:\\home\\video-convert\\intro.mov"
-# defaultOutro = "z:\\home\\video-convert\\outro.mov"
+defaultIntro = "z:\\home\\video-convert\\intro.mov"
+defaultOutro = "z:\\home\\video-convert\\outro.mov"
 
-# defaultLogo = "z:\\home\\video-convert\\dtulogo.png"
-# nametagPath = "z:\\home\\video-convert\\navneskilt.mov"
+defaultLogo = "z:\\home\\video-convert\\dtulogo.png"
+nametagPath = "z:\\home\\video-convert\\navneskilt.mov"
 
 rawSuffix = "raw" # Used to be 720p
 
@@ -80,7 +80,7 @@ CPUS = 4
 NICENESS = 15
 
 # Number of simultaneous conversion threads
-conversionThreads = 2
+conversionThreads = 4
 
 # List of possible video file types
 fileTypes = ["mp4", "m4v", "mov"]
@@ -426,7 +426,7 @@ def anyVersionExists(file, rawSuffix):
     basename = re.split('-\w+\.\w+$',file)[0]
     for fileName in fileList:
         # Temporary workaround for faulty regex.
-        if fileName[:len(basename)] == basename and fileName[len(basename)+1:-4] != rawSuffix and fileName[-3:] in fileTypes:
+        if fileName[:len(basename)] == basename and fileName[len(basename)+1:-4] != rawSuffix and fileName[-3:] in fileTypes and not fileName.endswith('.new.m4v'):
             return True
         #if re.match(basename + "-(^(!?"+rawSuffix+")\w+)\.("+"|".join(fileTypes)+")", fileName):
         #   return True
@@ -1085,17 +1085,15 @@ class videoConvert(threading.Thread):
         audioFile = job['outputFile'] + '.wav'
         videoFile = job['outputFile'] + '.264'
         avsScript = job['outputFile'] + '.avs'
-
+        execLog = ""
+        log('Repacking file with ffmpeg, just to be sure.. ('+outputFile+')', 'blue')
         newlist = {}
         for key in job['files']:
             file = job['files'][key]
-            self.executeCommand("ffmpeg -i " + file + " -acodec copy -vcodec copy " + file + ".new.m4v -y")
+            execLog += self.executeCommand("ffmpeg -i " + file + " -acodec copy -vcodec copy " + file + ".new.m4v -y", includeStderr=True)
             newlist[key] = file + ".new.m4v"
         
-        #pp = pprint.PrettyPrinter()
-        #pp.pprint(job)
         job['files'] = newlist
-        #pp.pprint(job)
 
         self.writeAvisynth(job)
         
@@ -1103,19 +1101,21 @@ class videoConvert(threading.Thread):
             ffmetaFile = job['outputFile'] + '.ffmeta'
         else:
             ffmetaFile = None
-
-        log = ""
         try:
-            log += self.executeCommand("wine avs2pipe audio \"" + avsScript + "\" > \"" + audioFile + "\"", niceness=True, includeStderr=True)
+            log('Running avs2pipe audio.. ('+outputFile+')', 'blue')
+            execLog += self.executeCommand("wine avs2pipe audio \"" + avsScript + "\" > \"" + audioFile + "\"", niceness=True, includeStderr=True)
             #log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
-            log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -", niceness=True, includeStderr=True)
+            log('Running avs2yuv video.. ('+outputFile+')', 'blue')
+            execLog += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -", niceness=True, includeStderr=True)
+            log('Muxing with ffmpeg.. ('+outputFile+')', 'blue')
             if ffmetaFile:
-                log += self.executeCommand("ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -i \"" +ffmetaFile+ "\" -map_metadata 2 -vcodec copy -strict -2 \""+outputFile+"\" -y", niceness=True, includeStderr=True)
+                execLog += self.executeCommand("ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -i \"" +ffmetaFile+ "\" -map_metadata 2 -vcodec copy -strict -2 \""+outputFile+"\" -y", niceness=True, includeStderr=True)
             else:
-                log += self.executeCommand("ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\" -y", niceness=True, includeStderr=True)
+                execLog += self.executeCommand("ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\" -y", niceness=True, includeStderr=True)
         except Exception:
             raise
         finally:
+            log('Cleaning up.. ('+outputFile+')', 'blue')
             if os.path.isfile(audioFile):
                 os.remove(audioFile)
             if os.path.isfile(videoFile):
@@ -1135,7 +1135,6 @@ class videoConvert(threading.Thread):
         handBrakeArgs = "-e x264 -q " + str(options['quality']) + " -B " + str(options['audiobitrate']) + " -w " + str(options['width']) + " -l " + str(options['height'])  
         cmd = HandBrakeCLI + " --cpu " + str(CPUS) + " " + handBrakeArgs + " -r "+str(fps)+" -i '" + job['path'][0] + "' -o '" + job['outputFile'] + ".m4v'"
         return self.executeCommand(cmd, niceness=True, includeStderr=True)
-
 
 ##########################################
 ########### YOUTUBEUPLOAD ################
@@ -1210,6 +1209,7 @@ class youtubeUpload (threading.Thread):
                 try:
                     self.addToPlaylist(video_id, playlist)
                 except gdata.service.RequestError:
+                    traceback.print_exc()
                     log("Some error occured adding the video to youtube playlist..", 'red')
                     return False
             return video_id
