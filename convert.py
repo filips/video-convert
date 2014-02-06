@@ -1002,14 +1002,14 @@ class videoConvert(threading.Thread):
             os.remove(outputFile)
 
         try:
-            if not conversionJob['config'].get('branding') == True and len(rawFiles) == 1:
-                log("HandBrake conversion of " + rawFiles[0] + " to " + conversionJob['preset'])
-                convertLog = self.handbrakeConversion(conversionJob)
-            else:
-                # BUG: Fallthrough if branding is disabled and more than one raw file is found!
-                log("Avisynth conversion of " + rawFiles[0] + " to " + conversionJob['preset'])
-                log("Job consists of " + str(len(rawFiles)) + " raw files")
-                convertLog = self.avisynthConversion(conversionJob)
+            #if not conversionJob['config'].get('branding') == True and len(rawFiles) == 1:
+            #    log("HandBrake conversion of " + rawFiles[0] + " to " + conversionJob['preset'])
+            #    convertLog = self.handbrakeConversion(conversionJob)
+            #else:
+            #    # BUG: Fallthrough if branding is disabled and more than one raw file is found!
+            log("Avisynth conversion of " + rawFiles[0] + " to " + conversionJob['preset'])
+            log("Job consists of " + str(len(rawFiles)) + " raw files")
+            convertLog = self.avisynthConversion(conversionJob)
         except metadataException as e:
             log("Error '"+e[0]['type']+"' for file " + rawFiles[0], 'red')
             return False
