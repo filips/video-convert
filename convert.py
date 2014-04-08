@@ -1157,6 +1157,7 @@ class youtubeUpload (threading.Thread):
             if self.queue.__len__() > 0:
                 element = self.queue.popleft()
                 metadata = getMetadata(element['filename'])
+                log("Attempting YouTube upload of '%s'" % element['filename'], 'green')
                 if metadata.get("enotelms:YouTubeUID"):
                     log("Video is already on YouTube: " + element['filename'], 'yellow')
                     continue
