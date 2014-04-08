@@ -1163,6 +1163,8 @@ class youtubeUpload (threading.Thread):
                 else:
                     try:
                         self.yt_service = self.authenticate(element['username'],element['password'],element['developerKey'])
+                    except gdata.service.BadAuthentication:
+                        log("ERROR: Wrong credentials for YouTube account '%s'" % element['username'], "red")
                     except gdata.service.Error as e:
                         traceback.print_exc()
                         log("ERROR: (Possibly?) no video channel created on YouTube account: " + element['username'], "red")
