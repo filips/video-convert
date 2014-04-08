@@ -1,0 +1,12 @@
+{
+    "fontDir": "/home/video-convert/.fonts/",
+    "scriptDir": "/home/video-convert/",
+    "podcastPath": "/home/video-convert/podcasts",
+    "nametagPath": "z:\\home\\video-convert\\navneskilt.mov",
+    "defaultYoutubeCategory": "Education",
+    "defaultYoutubeKeywords": "Education",
+    "defaultIntro": "z:\\home\\video-convert\\intro.mov",
+    "defaultOutro": "z:\\home\\video-convert\\outro.mov",
+    "defaultLogo": "z:\\home\\video-convert\\dtulogo.png",
+    "queueTextFile": "/home/video-convert/podcasts/queue.html"
+}

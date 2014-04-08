@@ -39,40 +39,41 @@ import getopt
 ########### CONSTANTS ####################
 ##########################################
 
+settingsFile = os.path.join(os.path.dirname(os.path.realpath(__file__)), "settings.json")
 
-#NO trailing slash on podcastPath!!
+settings = False
+missing = False
 
-#podcastPath = "/Users/filip/podcasts"
-#scriptDir = "/Users/filip/"
-#queueTextFile = "/Users/filip/queue.html"
+if os.path.isfile(settingsFile):
+    try:
+        settings = json.loads(open(settingsFile).read())
+        requiredFields = [
+            "fontDir",
+            "scriptDir",
+            "podcastPath",
+            "nametagPath",
+            "defaultYoutubeCategory",
+            "defaultYoutubeKeywords",
+            "defaultIntro",
+            "defaultOutro",
+            "defaultLogo",
+            "queueTextFile"
+        ]
+        for field in requiredFields:
+            if not field in settings:
+                print "Missing option '" + field + "' in settings.json"
+                missing = True
+    except:
+        settings = None
 
-#fontDir = "/Users/filip/Library/Fonts/"
-#nametagPath = "z:\\Users\\filip\\navneskilt.mov"
-
-fontDir = "/home/video-convert/.fonts/"
-
-podcastPath = "/home/video-convert/podcasts"
-scriptDir = "/home/video-convert/"
-HandBrakeCLI = "/home/typothree/prefix/bin/HandBrakeCLI"
-
-queueTextFile = "/home/video-convert/podcasts/queue.html"
-
-# YouTube parameters to be passed if metadata is missing
-defaultYoutubeCategory = "Education"
-defaultYoutubeKeywords = "Education"
-
-# Default intro and outro video in case branding is specified, but no custom files are found
-
-#defaultIntro = "z:\\Users\\filip\\intro.mov"
-#defaultOutro = "z:\\Users\\filip\\outro.mov"
-
-#defaultLogo = "z:\\Users\\filip\\dtulogo.png"
-
-defaultIntro = "z:\\home\\video-convert\\intro.mov"
-defaultOutro = "z:\\home\\video-convert\\outro.mov"
-
-defaultLogo = "z:\\home\\video-convert\\dtulogo.png"
-nametagPath = "z:\\home\\video-convert\\navneskilt.mov"
+if settings is False:
+    print "No settings.json file found!"
+    sys.exit(1)
+elif settings is None:
+    print "Invalid JSON in settings.json"
+    sys.exit(1)
+elif missing:
+    sys.exit(1)
 
 rawSuffix = "raw" # Used to be 720p
 
@@ -86,15 +87,12 @@ conversionThreads = 4
 fileTypes = ["mp4", "m4v", "mov"]
 
 
-fullLog = open(scriptDir + "full.log", 'a')
-infoLog = open(scriptDir + "info.log", 'a')
+fullLog = open(settings.get("scriptDir") + "full.log", 'a')
+infoLog = open(settings.get("scriptDir") + "info.log", 'a')
 
 fileList = []
 structure = {}
 conversionList = []
-
-# The drive letter in Wine correlating to linux "/"
-wineDrive = "z"
 
 # Video framerate. Should be configurable on a per-channel basis
 fps = 25 
@@ -192,16 +190,16 @@ def saveQueueText():
     </body>
 </html>
     """
-    if queueTextFile:
-        with open(queueTextFile, 'w') as f:
+    if settings.get('queueTextFile'):
+        with open(settings.get("queueTextFile"), 'w') as f:
             f.write(accum)
 
 def scanStructure():
     _structure = {}
     _fileList = []
-    log("Scanning " + podcastPath +  " for movie files...")
-    for root, subFolders, files in os.walk(podcastPath):
-        path = root[len(podcastPath):].split('/')
+    log("Scanning " + settings.get('podcastPath') +  " for movie files...")
+    for root, subFolders, files in os.walk(settings.get('podcastPath')):
+        path = root[len(settings.get('podcastPath')):].split('/')
         lastStructure = _structure
         for part in path:
             if part not in lastStructure:
@@ -450,7 +448,7 @@ def jobQueued(file, suffix):
 
 # Get the complete config array for a file located at "file"
 def getConfig(file):
-    parts = file[len(podcastPath):].split('/')[:-1]
+    parts = file[len(settings.get('podcastPath')):].split('/')[:-1]
     config = {}
     parent = structure
     for i in parts:
@@ -516,6 +514,10 @@ class executeException(Exception):
 
 class videoConvert(threading.Thread):
     currentlyConverting = False
+
+    # The drive letter in Wine correlating to linux "/"
+    wineDrive = "z"
+    
     def __init__(self, conversionJob):
         threading.Thread.__init__(self)
         self.job = conversionJob
@@ -597,8 +599,8 @@ class videoConvert(threading.Thread):
         import Image, ImageDraw, ImageFont
         width, height = 875, 115
 
-        font = os.path.join(fontDir, "NeoSansStd-Regular.otf")
-        mediumFont = os.path.join(fontDir, "NeoSansStd-Medium.otf")
+        font = os.path.join(settings.get('fontDir'), "NeoSansStd-Regular.otf")
+        mediumFont = os.path.join(settings.get('fontDir'), "NeoSansStd-Medium.otf")
 
         textcolor = (27,65,132,255)
         strings = []
@@ -615,9 +617,9 @@ class videoConvert(threading.Thread):
 
         img = Image.new("RGBA", (width, height), (0,0,0,0))
         draw = ImageDraw.Draw(img)
-        titleFont = os.path.join(fontDir, "NeoSansStd-Medium.otf")
+        titleFont = os.path.join(settings.get('fontDir'), "NeoSansStd-Medium.otf")
         titleFontEl = ImageFont.truetype(titleFont, 40, encoding='unic')
-        regularFont = os.path.join(fontDir, "NeoSansStd-Regular.otf")
+        regularFont = os.path.join(settings.get('fontDir'), "NeoSansStd-Regular.otf")
 
         titleSize = titleFontEl.getsize(title)
 
@@ -661,7 +663,7 @@ class videoConvert(threading.Thread):
         width, height = 1280, 720
         titleOffsetX = 340
 
-        font = os.path.join(fontDir, "NeoSansStd-Regular.otf")
+        font = os.path.join(settings.get('fontDir'), "NeoSansStd-Regular.otf")
         fontsize = 44
         textcolor = (164,164,164,255)
 
@@ -782,9 +784,9 @@ class videoConvert(threading.Thread):
             return False 
         else:
             return videoinfo
-
-    def winPath(self, unix_path):
-        return wineDrive + ":" + unix_path.replace("/","\\")
+    
+    def winPath(self,unix_path):
+        return videoConvert.wineDrive + ":" + unix_path.replace("/","\\")
 
 
     def getCorrectedTime(self, time, remSecs):
@@ -880,7 +882,7 @@ class videoConvert(threading.Thread):
             if lowerThirdsData:
                 if len(lowerThirdsData)%3 == 0:
                     for n in range(len(lowerThirdsData)/3):
-                        image = scriptDir+"Konverterede/" + options['path'][1] + '-lowerThird-'+str(n)+'.png';
+                        image = settings.get('scriptDir')+"Konverterede/" + options['path'][1] + '-lowerThird-'+str(n)+'.png';
                         self.generateLTOverlay(lowerThirdsData[(n-1)*3+1].replace(unichr(9634),','), lowerThirdsData[(n-1)*3+2].replace(unichr(9634),','), image)
                         newTime = self.getCorrectedTime(float(lowerThirdsData[(n-1)*3]), newRemoveSections)
                         if newTime != None:
@@ -918,21 +920,28 @@ class videoConvert(threading.Thread):
         if os.path.isfile(dirname + "intro.mov"):
             intro = self.winPath(dirname + "intro.mov")
         else:
-            intro = defaultIntro
+            intro = settings.get('defaultIntro')
         if os.path.isfile(dirname + "outro.mov"):
             outro = self.winPath(dirname + "outro.mov")
         else:
-            outro = defaultOutro
+            outro = settings.get('defaultOutro')
+        
+        logo = metadata.get('logo')
+        if not logo:
+            logo = ""
 
-        if os.path.isfile(dirname + "logo.png"):
-            logoOverlay = self.winPath(dirname + "logo.png")
+        if logo == "false":
+            branding = False
+            logoOverlay = ""
+        elif os.path.isfile(dirname + "logo" + logo + ".png"):
+            logoOverlay = self.winPath(dirname + "logo" + logo + ".png")
         else:
-            logoOverlay = defaultLogo
+            logoOverlay = settings.get('defaultLogo')
 
         if title and course_id and pubdate:
-            self.generateIntroOverlay(title, course_id, pubdate, scriptDir+"Konverterede/" + options['path'][1] + '-introOverlay.png', titleColor)
-            self.generateOutroOverlays(producer, technician , lecturer, year, nodtubranding, scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay')
-            template = open(scriptDir + "video-convert/avisynth.avs", 'r').read().decode('utf-8')
+            self.generateIntroOverlay(title, course_id, pubdate, settings.get('scriptDir')+"Konverterede/" + options['path'][1] + '-introOverlay.png', titleColor)
+            self.generateOutroOverlays(producer, technician , lecturer, year, nodtubranding, settings.get('scriptDir')+"Konverterede/" + options['path'][1] + '-outroOverlay')
+            template = open(settings.get('scriptDir') + "video-convert/avisynth.avs", 'r').read().decode('utf-8')
             videoList = ""
             for i in range(len(options['files'])):
 
@@ -964,15 +973,15 @@ class videoConvert(threading.Thread):
                 videoList=videoList, 
                 correctH264Levels=H264Correction,
                 fps=fps,
-                introoverlay=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-introOverlay.png'),
-                outrooverlay1=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay1.png'),
-                outrooverlay2=self.winPath(scriptDir+"Konverterede/" + options['path'][1] + '-outroOverlay2.png'),
+                introoverlay=self.winPath(settings.get('scriptDir')+"Konverterede/" + options['path'][1] + '-introOverlay.png'),
+                outrooverlay1=self.winPath(settings.get('scriptDir')+"Konverterede/" + options['path'][1] + '-outroOverlay1.png'),
+                outrooverlay2=self.winPath(settings.get('scriptDir')+"Konverterede/" + options['path'][1] + '-outroOverlay2.png'),
                 logoOverlay=logoOverlay,
                 lowerThirdList=lowerThirdsCmd,
                 removeSection=removeSectionCmd,
-                nametag=nametagPath
+                nametag=settings.get('nametagPath')
                 )
-            script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.avs', 'w')
+            script = open(settings.get('scriptDir')+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.avs', 'w')
             script.write(template.encode('latin-1', 'ignore'))
             script.close
             return template
@@ -988,7 +997,7 @@ class videoConvert(threading.Thread):
             log("Missing options: " + ", ".join(missingOptions) + " for file " + rawFiles[0])
             return False
 
-        conversionJob['outputFile'] = scriptDir+"Konverterede/" + conversionJob['path'][1] + "-"+ conversionJob['options']['suffix']
+        conversionJob['outputFile'] = settings.get('scriptDir')+"Konverterede/" + conversionJob['path'][1] + "-"+ conversionJob['options']['suffix']
         outputFile = conversionJob['outputFile']
         finalDestination = re.sub(conversionJob['rawSuffix']+"\..+", conversionJob['options']['suffix'] + ".m4v",conversionJob['path'][0])
         if os.path.isfile(finalDestination) and not conversionJob['metadata'].get('reconvert') == "true":
@@ -1071,7 +1080,7 @@ class videoConvert(threading.Thread):
                 ffmeta += "END=" + str(nextseconds * 1000) + "\n" 
                 ffmeta += "title=" + value[1] + "\n"
 
-            script = open(scriptDir+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.ffmeta', 'w')
+            script = open(settings.get('scriptDir')+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.ffmeta', 'w')
             script.write(ffmeta.encode('utf-8'))
             script.close
             return True
@@ -1123,7 +1132,7 @@ class videoConvert(threading.Thread):
             for file in newlist:
                 if os.path.isfile(newlist[file]):
                     os.remove(newlist[file])
-        return log
+            return execLog
 
     # Legacy conversion using Handbrake. As of now faster and perhaps more reliable than avisynth.
     def handbrakeConversion(self, job):
@@ -1135,6 +1144,7 @@ class videoConvert(threading.Thread):
         handBrakeArgs = "-e x264 -q " + str(options['quality']) + " -B " + str(options['audiobitrate']) + " -w " + str(options['width']) + " -l " + str(options['height'])  
         cmd = HandBrakeCLI + " --cpu " + str(CPUS) + " " + handBrakeArgs + " -r "+str(fps)+" -i '" + job['path'][0] + "' -o '" + job['outputFile'] + ".m4v'"
         return self.executeCommand(cmd, niceness=True, includeStderr=True)
+
 
 ##########################################
 ########### YOUTUBEUPLOAD ################
@@ -1178,7 +1188,7 @@ class youtubeUpload (threading.Thread):
             log("Missing options: " + ", ".join(missing) + " for file " + preferences['filename'], 'red')
             return False
         if not metadata.get('itunes:keywords'):
-            metadata['itunes:keywords'] = defaultYoutubeKeywords
+            metadata['itunes:keywords'] = settings.get('defaultYoutubeKeywords')
             log("WARNING: No keywords specified for file: " + preferences['filename'] + "!", 'yellow')
 
         key = ""
@@ -1263,7 +1273,7 @@ class youtubeUpload (threading.Thread):
         if options.get('category'):
             category = options.get('category')
         else:
-            category = defaultYoutubeCategory
+            category = settings.get('defaultYoutubeCategory')
         media_group = gdata.media.Group(
             title = gdata.media.Title(text=options['title']),
             description = gdata.media.Description(description_type='plain', text=options['description']),
