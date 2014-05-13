@@ -1,4 +1,4 @@
-#!/usr/bin/python2.6
+#!/usr/bin/python2.6 -u
 # -*- coding: utf-8 -*-
 
 # Copyright (c) 2012 Filip Sandborg-Olsen <filipsandborg@gmail.com>
@@ -1034,7 +1034,7 @@ class videoConvert(threading.Thread):
                 shutil.move(outputFile, finalDestination)
                 success = True
             else:
-                log("Encoding of " + outputFile + " failed!", 'red')
+                log("Encoding of " + outputFile + " failed (no output file)!", 'red')
 
         if convertLog:
             fp = open(outputFile.replace(".m4v",".log"), "w")
@@ -1099,7 +1099,7 @@ class videoConvert(threading.Thread):
         newlist = {}
         for key in job['files']:
             file = job['files'][key]
-            execLog += self.executeCommand("ffmpeg -i " + file + " -acodec copy -vcodec copy " + file + ".new.m4v -y", includeStderr=True)
+            execLog += self.executeCommand("ffmpeg -y -i " + file + " -acodec copy -vcodec copy " + file + ".new.m4v", includeStderr=True)
             newlist[key] = file + ".new.m4v"
         
         job['files'] = newlist
@@ -1118,9 +1118,9 @@ class videoConvert(threading.Thread):
             execLog += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -", niceness=True, includeStderr=True)
             log('Muxing with ffmpeg.. ('+outputFile+')', 'blue')
             if ffmetaFile:
-                execLog += self.executeCommand("ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -i \"" +ffmetaFile+ "\" -map_metadata 2 -vcodec copy -strict -2 \""+outputFile+"\" -y", niceness=True, includeStderr=True)
+                execLog += self.executeCommand("ffmpeg -y -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -i \"" +ffmetaFile+ "\" -map_metadata 2 -vcodec copy -strict -2 \""+outputFile+"\" ", niceness=True, includeStderr=True)
             else:
-                execLog += self.executeCommand("ffmpeg -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\" -y", niceness=True, includeStderr=True)
+                execLog += self.executeCommand("ffmpeg -y -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\" ", niceness=True, includeStderr=True)
         except Exception:
             raise
         finally:
