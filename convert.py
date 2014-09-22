@@ -753,28 +753,24 @@ class videoConvert(threading.Thread):
     @staticmethod
     def videoInfo(file):
         try:
-            numStreams = int(videoConvert.executeCommand("ffprobe \""+file+"\" 2>&1 | awk '/Stream .+ Video.*1280x720/{print $0}' | wc -l"))
-            metaData = videoConvert.executeCommand("exiftool \""+file+"\"")
+            infoDict = videoConvert.executeCommand("ffprobe \""+file+"\" -print_format json -show_format -show_streams 2>/dev/null")
 
-            info = {}
-            for line in metaData.splitlines():
-                key, value = [x.strip() for x in line.split(" : ")]
-                info[key] = value
+            info = json.loads(infoDict)
 
-            if info['Duration'][-1] == 's':
-                secs = float(info['Duration'][0:-2])
-            else:
-                length = info['Duration'].split(":")
-                if len(length) == 2:
-                    hours = 0
-                else:
-                    hours = length[0]
-                secs = int(hours) * 3600 + int(length[-2]) * 60 + int(length[-1])
+            videoStreams = 0
+            width, height = 0,0
+            
+            for stream in info.get("streams"):
+                if stream.get("codec_type") == "video":
+                    videoStreams += 1
+                    width = stream.get("width")
+                    height = stream.get("height")
+            
             videoinfo = {
-                "videoStreams": numStreams,
-                "height": int(info['Image Height']),
-                "width": int(info['Image Width']),
-                "length": secs
+                "videoStreams": videoStreams,
+                "height": int(height),
+                "width": int(width),
+                "length": float(info.get('format').get("duration"))
             }
         except executeException:
             return False
