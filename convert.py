@@ -591,11 +591,10 @@ class videoConvert(threading.Thread):
                             youtubeUpload.addToQueue(destination, youtubeConfig)
                 else:
                     error = True
-                    setQuarantine(self.job['path'][0])
-                    if self.job['config'].get("contactEmail"):
-                        sendErrorReport(self.job['path'][0], self.job['config'].get('contactEmail'))
-            else:
+            if error or resolutionError:
                 setQuarantine(self.job['path'][0])
+                if self.job['config'].get("contactEmail"):
+                    sendErrorReport(self.job['path'][0], self.job['config'].get('contactEmail'))
             self.currentlyConverting = False
         except:
             log(traceback.format_exc(), 'red')
