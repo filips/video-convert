@@ -434,7 +434,7 @@ def anyVersionExists(file, rawSuffix):
     basename = re.split('-\w+\.\w+$',file)[0]
     for fileName in fileList:
         # Temporary workaround for faulty regex.
-        if fileName[:len(basename)] == basename and fileName[len(basename)+1:-4] != rawSuffix and fileName[-3:] in fileTypes and not fileName.endswith('.new.mov'):
+        if fileName[:len(basename)] == basename and fileName[len(basename)+1:-4] != rawSuffix and fileName[-3:] in fileTypes and not fileName.endswith('.new.m4v'):
             return True
         #if re.match(basename + "-(^(!?"+rawSuffix+")\w+)\.("+"|".join(fileTypes)+")", fileName):
         #   return True
@@ -1007,13 +1007,13 @@ class videoConvert(threading.Thread):
 
         conversionJob['outputFile'] = settings.get('scriptDir')+"Konverterede/" + conversionJob['path'][1] + "-"+ conversionJob['options']['suffix']
         outputFile = conversionJob['outputFile']
-        finalDestination = re.sub(conversionJob['rawSuffix']+"\..+", conversionJob['options']['suffix'] + ".mov",conversionJob['path'][0])
+        finalDestination = re.sub(conversionJob['rawSuffix']+"\..+", conversionJob['options']['suffix'] + ".m4v",conversionJob['path'][0])
         if os.path.isfile(finalDestination) and not conversionJob['metadata'].get('reconvert') == "true":
             log("File " + finalDestination + " already exists!")
             return False
         success = False
         convertLog = ""
-        outputFile = outputFile + ".mov"
+        outputFile = outputFile + ".m4v"
         if os.path.isfile(outputFile):
             log("Removed outputFile prior to encoding ...")
             os.remove(outputFile)
@@ -1043,7 +1043,7 @@ class videoConvert(threading.Thread):
                 log("Encoding of " + outputFile + " failed (no output file)!", 'red')
 
         if convertLog:
-            fp = open(outputFile.replace(".mov",".log"), "w")
+            fp = open(outputFile.replace(".m4v",".log"), "w")
             fp.write(convertLog)
             fp.close()
 
@@ -1097,7 +1097,7 @@ class videoConvert(threading.Thread):
         options = job['options']
         streams = job['streams']
         inputFile = job['path'][0]
-        outputFile = job['outputFile'] + '.mov'
+        outputFile = job['outputFile'] + '.m4v'
         audioFile = job['outputFile'] + '.wav'
         videoFile = job['outputFile'] + '.264'
         avsScript = job['outputFile'] + '.avs'
@@ -1108,8 +1108,8 @@ class videoConvert(threading.Thread):
         for key in job['files']:
             file = job['files'][key]
             stream = streams[index]
-            execLog += self.executeCommand("ffmpeg -y -i " + file + " -map 0:"+str(stream['video'])+" -map 0:"+str(stream['audio'])+" -acodec copy -vcodec copy " + file + ".new.mov", includeStderr=True)
-            newlist[key] = file + ".new.mov"
+            execLog += self.executeCommand("ffmpeg -y -i " + file + " -map 0:"+str(stream['video'])+" -map 0:"+str(stream['audio'])+" -acodec copy -vcodec copy " + file + ".new.m4v", includeStderr=True)
+            newlist[key] = file + ".new.m4v"
             index += 1
         
         job['files'] = newlist
@@ -1152,7 +1152,7 @@ class videoConvert(threading.Thread):
 
         options = job['options']
         handBrakeArgs = "-e x264 -q " + str(options['quality']) + " -B " + str(options['audiobitrate']) + " -w " + str(options['width']) + " -l " + str(options['height'])  
-        cmd = HandBrakeCLI + " --cpu " + str(CPUS) + " " + handBrakeArgs + " -r "+str(fps)+" -i '" + job['path'][0] + "' -o '" + job['outputFile'] + ".mov'"
+        cmd = HandBrakeCLI + " --cpu " + str(CPUS) + " " + handBrakeArgs + " -r "+str(fps)+" -i '" + job['path'][0] + "' -o '" + job['outputFile'] + ".m4v'"
         return self.executeCommand(cmd, niceness=True, includeStderr=True)
 
 
