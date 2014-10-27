@@ -1,7 +1,7 @@
 #!/usr/bin/python2.6 -u
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2012 Filip Sandborg-Olsen <filipsandborg@gmail.com>
+# Copyright (c) 2014 Filip Sandborg-Olsen <filipsandborg@gmail.com>
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -298,9 +298,19 @@ def checkFiles(force=False):
                     if not metadata:
                         log("Missing metadata for file " + file, 'red')
                         continue
-                    if metadata.get('quarantine') == "true":
-                        log(file+" is in quarantine!", "red")
-                        continue
+                    if metadata.get('quarantine'):
+                        try:
+                            quarantineTime = int(metadata.get('quarantine'))
+                        except:
+                            quarantineTime = 0
+
+                        if time.time() - quarantineTime < 86400:
+                            log(file+" is in quarantine!", "red")
+                            continue
+                        else:
+                            log('Removing file '+ file + ' from quarantine', 'yellow')
+                            removeQuarantine(file)
+
                     if any(e in os.path.basename(file) for e in illegalChars):
                         log("ILLEGAL CHARS IN " + file, "red")
                         continue
@@ -424,7 +434,7 @@ def anyVersionExists(file, rawSuffix):
     basename = re.split('-\w+\.\w+$',file)[0]
     for fileName in fileList:
         # Temporary workaround for faulty regex.
-        if fileName[:len(basename)] == basename and fileName[len(basename)+1:-4] != rawSuffix and fileName[-3:] in fileTypes and not fileName.endswith('.new.m4v'):
+        if fileName[:len(basename)] == basename and fileName[len(basename)+1:-4] != rawSuffix and fileName[-3:] in fileTypes and not fileName.endswith('.new.mov'):
             return True
         #if re.match(basename + "-(^(!?"+rawSuffix+")\w+)\.("+"|".join(fileTypes)+")", fileName):
         #   return True
@@ -493,10 +503,12 @@ def currentlyProcessing():
         if status != False:
             converting.append(status)
     return converting
-def acquireLock():
-    start = time.time()
-    conversionQueueLock.acquire()
-    print "Acquire time: " + str(time.time() - start)
+
+def setQuarantine(file):
+    writeMetadata(file, {"quarantine": int(time.time()), "conversion": "failed"})
+
+def removeQuarantine(file):
+    writeMetadata(file, {"quarantine": False})
 
 ##########################################
 ########### CUSTOM EXCEPTIONS ############
@@ -534,6 +546,7 @@ class videoConvert(threading.Thread):
             endOffset   = self.job['metadata'].get('endOffset')
             
             self.job['originalDuration'] = []
+            self.job['streams'] = []
 
             for key in self.job['files']:
                 info = self.videoInfo(element['files'][key])
@@ -558,36 +571,31 @@ class videoConvert(threading.Thread):
                 width, height = info['width'], info['height']
                 if (width, height) != (1280, 720):
                     log("Videofile " + self.job['files'][key] + " has resolution " + str(width) + "x" + str(height) + " and was quarantined!", 'red')
-                    writeMetadata(self.job['path'][0], {"quarantine": "true"})
+                    setQuarantine(self.job['path'][0])
                     resolutionError = True
-            if not resolutionError and not error:
-                if numStreams == 1:
-                    if self.handleConversionJob(self.job):
-
-                        writeMetadata(element['path'][0], {"conversion": False})
-
-                        # Adding job to youtubeUpload's queue. Should probably be handled by a watcher thread instead
-                        youtubeConfig = self.job['config'].get("youtube")
-                        destination = re.sub(self.job['rawSuffix'], self.job['options']['suffix'],self.job['path'][0])
-
-                        if youtubeConfig and self.job['config'].get('youtubeUpload') == True:
-                            if self.job.get("preset") == youtubeConfig.get("uploadVersion"):
-                                destination = destination[:-3] + "m4v"
-                                youtubeUpload.addToQueue(destination, youtubeConfig)
-                    else:
-                        error = True
-                        if self.job['config'].get("contactEmail"):
-                            sendErrorReport(self.job['path'][0], self.job['config'].get('contactEmail'))
-                elif numStreams == False:
-                    log("Couldn't get video information for " + self.job['path'][0] + " , skipping!")
+                if info['streams']['audio'] is None or info['streams']['video'] is None:
+                    log("Couldn't find audio/video streams in file " + self.job['files'][key], 'red')
                     error = True
                 else:
-                    log("Video contains " + str(numStreams) + " videostrems, and was quarantined! ("+self.job['path'][0]+")", 'red')
-                    writeMetadata(self.job['path'][0], {"quarantine": "true"})
-                    error = True
+                    self.job['streams'].append(info['streams'])
+            if not resolutionError and not error:
+                if self.handleConversionJob(self.job):
+                    writeMetadata(element['path'][0], {"conversion": False})
+                    # Adding job to youtubeUpload's queue. Should probably be handled by a watcher thread instead
+                    youtubeConfig = self.job['config'].get("youtube")
+                    destination = re.sub(self.job['rawSuffix'], self.job['options']['suffix'],self.job['path'][0])
 
-            if error or resolutionError:
-                writeMetadata(self.job['path'][0], {"conversion": "failed", "quarantine": "true"})
+                    if youtubeConfig and self.job['config'].get('youtubeUpload') == True:
+                        if self.job.get("preset") == youtubeConfig.get("uploadVersion"):
+                            destination = destination[:-3] + "mov"
+                            youtubeUpload.addToQueue(destination, youtubeConfig)
+                else:
+                    error = True
+                    setQuarantine(self.job['path'][0])
+                    if self.job['config'].get("contactEmail"):
+                        sendErrorReport(self.job['path'][0], self.job['config'].get('contactEmail'))
+            else:
+                setQuarantine(self.job['path'][0])
             self.currentlyConverting = False
         except:
             log(traceback.format_exc(), 'red')
@@ -700,8 +708,6 @@ class videoConvert(threading.Thread):
         
         for pos, text, color, size, font in strings:
             imtext = Image.new("L", imsize, 0)
-            # draw = ImageDraw.Draw(imtext)
-            # font = ImageFont.truetype(font, size, encoding='unic')
 
             draw = aggdraw.Draw(imtext)
             font = aggdraw.Font((255,255,255), font, size=size)
@@ -714,7 +720,6 @@ class videoConvert(threading.Thread):
                 pass
                 offset_y = imsize[1] - draw.textsize(text, font)[1] + pos[1]
 
-            # draw.text((offset_x, offset_y), text, font=font, fill="white")
             draw.text((offset_x, offset_y), text, font)
             draw.flush()
 
@@ -759,18 +764,25 @@ class videoConvert(threading.Thread):
 
             videoStreams = 0
             width, height = 0,0
+
+            streams = {"video": None, "audio": None}
             
             for stream in info.get("streams"):
                 if stream.get("codec_type") == "video":
                     videoStreams += 1
-                    width = stream.get("width")
-                    height = stream.get("height")
+                    if (stream.get("width"),stream.get("height")) == (1280,720):
+                        width = stream.get("width")
+                        height = stream.get("height")
+                        streams['video'] = stream.get("index")
+                elif stream.get("codec_type") == "audio":
+                    streams['audio'] = stream.get("index")
             
             videoinfo = {
                 "videoStreams": videoStreams,
                 "height": int(height),
                 "width": int(width),
-                "length": float(info.get('format').get("duration"))
+                "length": float(info.get('format').get("duration")),
+                "streams": streams
             }
         except executeException:
             return False
@@ -995,13 +1007,13 @@ class videoConvert(threading.Thread):
 
         conversionJob['outputFile'] = settings.get('scriptDir')+"Konverterede/" + conversionJob['path'][1] + "-"+ conversionJob['options']['suffix']
         outputFile = conversionJob['outputFile']
-        finalDestination = re.sub(conversionJob['rawSuffix']+"\..+", conversionJob['options']['suffix'] + ".m4v",conversionJob['path'][0])
+        finalDestination = re.sub(conversionJob['rawSuffix']+"\..+", conversionJob['options']['suffix'] + ".mov",conversionJob['path'][0])
         if os.path.isfile(finalDestination) and not conversionJob['metadata'].get('reconvert') == "true":
             log("File " + finalDestination + " already exists!")
             return False
         success = False
         convertLog = ""
-        outputFile = outputFile + ".m4v"
+        outputFile = outputFile + ".mov"
         if os.path.isfile(outputFile):
             log("Removed outputFile prior to encoding ...")
             os.remove(outputFile)
@@ -1022,8 +1034,6 @@ class videoConvert(threading.Thread):
             print "error"
             print e
             log("Encoding of " + outputFile + " failed!", 'red')
-        #except Exception as e:
-        #   print e
         else:
             if os.path.isfile(outputFile):
                 log("Encoding of " + outputFile + " succeded!", 'green')
@@ -1033,7 +1043,7 @@ class videoConvert(threading.Thread):
                 log("Encoding of " + outputFile + " failed (no output file)!", 'red')
 
         if convertLog:
-            fp = open(outputFile.replace(".m4v",".log"), "w")
+            fp = open(outputFile.replace(".mov",".log"), "w")
             fp.write(convertLog)
             fp.close()
 
@@ -1085,18 +1095,22 @@ class videoConvert(threading.Thread):
     # Conversion using avisynth, utilizing branding and intro/outro videos
     def avisynthConversion(self, job):
         options = job['options']
+        streams = job['streams']
         inputFile = job['path'][0]
-        outputFile = job['outputFile'] + '.m4v'
+        outputFile = job['outputFile'] + '.mov'
         audioFile = job['outputFile'] + '.wav'
         videoFile = job['outputFile'] + '.264'
         avsScript = job['outputFile'] + '.avs'
         execLog = ""
         log('Repacking file with ffmpeg, just to be sure.. ('+outputFile+')', 'blue')
         newlist = {}
+        index = 0
         for key in job['files']:
             file = job['files'][key]
-            execLog += self.executeCommand("ffmpeg -y -i " + file + " -acodec copy -vcodec copy " + file + ".new.m4v", includeStderr=True)
-            newlist[key] = file + ".new.m4v"
+            stream = streams[index]
+            execLog += self.executeCommand("ffmpeg -y -i " + file + " -map 0:"+str(stream['video'])+" -map 0:"+str(stream['audio'])+" -acodec copy -vcodec copy " + file + ".new.mov", includeStderr=True)
+            newlist[key] = file + ".new.mov"
+            index += 1
         
         job['files'] = newlist
 
@@ -1109,7 +1123,6 @@ class videoConvert(threading.Thread):
         try:
             log('Running avs2pipe audio.. ('+outputFile+')', 'blue')
             execLog += self.executeCommand("wine avs2pipe audio \"" + avsScript + "\" > \"" + audioFile + "\"", niceness=True, includeStderr=True)
-            #log += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -")
             log('Running avs2yuv video.. ('+outputFile+')', 'blue')
             execLog += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -", niceness=True, includeStderr=True)
             log('Muxing with ffmpeg.. ('+outputFile+')', 'blue')
@@ -1128,17 +1141,18 @@ class videoConvert(threading.Thread):
             for file in newlist:
                 if os.path.isfile(newlist[file]):
                     os.remove(newlist[file])
-            return execLog
+        
+        return execLog
 
     # Legacy conversion using Handbrake. As of now faster and perhaps more reliable than avisynth.
     def handbrakeConversion(self, job):
         log("Handbrake not supported! QUARANTINED", 'red')
-        writeMetadata(job['path'][0], {"quarantine": "true"})
+        setQuarantine(job['path'][0])
         return "HANDBRAKE NOT INSTALLED!"
 
         options = job['options']
         handBrakeArgs = "-e x264 -q " + str(options['quality']) + " -B " + str(options['audiobitrate']) + " -w " + str(options['width']) + " -l " + str(options['height'])  
-        cmd = HandBrakeCLI + " --cpu " + str(CPUS) + " " + handBrakeArgs + " -r "+str(fps)+" -i '" + job['path'][0] + "' -o '" + job['outputFile'] + ".m4v'"
+        cmd = HandBrakeCLI + " --cpu " + str(CPUS) + " " + handBrakeArgs + " -r "+str(fps)+" -i '" + job['path'][0] + "' -o '" + job['outputFile'] + ".mov'"
         return self.executeCommand(cmd, niceness=True, includeStderr=True)
 
 
