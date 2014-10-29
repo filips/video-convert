@@ -688,7 +688,7 @@ class videoConvert(threading.Thread):
                 except Exception as e:
                     error = True
                     setQuarantine(self.job['path'][0], str(e))
-                    log(str(e), 'e')
+                    log(str(e), 'red')
                 else:
                     writeMetadata(element['path'][0], {"conversion": False})
                     # Adding job to youtubeUpload's queue. Should probably be handled by a watcher thread instead
