@@ -35,6 +35,8 @@ from termcolor import colored
 from metadata import getMetadata, writeMetadata
 import getopt
 
+from contextlib import contextmanager
+
 ##########################################
 ########### CONSTANTS ####################
 ##########################################
@@ -121,9 +123,39 @@ convertObjLock = threading.Lock()
 conversionObjs = []
 lastScanned = 0
 
+localeLock = threading.Lock()
+
+quarantinedFiles = []
+
+
+# Localization
+
+localizedStrings = {
+    'copyright': {"Danish": u"Danmarks Tekniske Universitet", "English": u"Technical University of Denmark"},
+    'presenter': {"Danish": u"Forelæser", "English": u"Presenter"},
+    'technician': {"Danish": u"Teknik", "English": u"Technician"},
+    'producer': {"Danish": u"Producer"}
+}
 ##########################################
 ########### STANDALONE METHODS ###########
 ##########################################
+
+@contextmanager
+def setLocale(name):
+    with localeLock:
+        oldLocale = locale.setlocale(locale.LC_ALL)
+        try:
+            yield locale.setlocale(locale.LC_ALL, name)
+        finally:
+            locale.setlocale(locale.LC_ALL, oldLocale)
+
+def getLocalizedString(string, language):
+    if string in localizedStrings:
+        default = localizedStrings[string].get('Danish')
+        if language in localizedStrings[string]:
+            return localizedStrings[string].get(language, default)
+    else:
+        return None
 
 def saveQueueText():
     accum = ""
@@ -194,6 +226,70 @@ def saveQueueText():
         with open(settings.get("queueTextFile"), 'w') as f:
             f.write(accum)
 
+def saveQuarantineText():
+    accum = ""
+    accum += """
+<html>
+    <head>
+        <title>Quarantine list</title>
+        <style>
+            table {
+                margin: auto;
+                margin-top: 100px;
+                border-spacing:0;
+                border-collapse:collapse;
+                width: 900px;
+            }
+            table tr th {
+                text-align: left;
+            }
+            table tr.header {
+                background-color: rgb(153,0,0);
+                color: #fff;
+            }
+            table tr.header th {
+                padding:5px;
+                padding-right: 40px;
+            }
+            table td {
+                padding: 5px;
+            }
+            table tr.odd {
+                background-color: #ddd;
+            }
+            body {
+                font-family: palatino;
+                font-size: 11px;
+            }
+        </style>
+        <meta http-equiv="refresh" content="5">
+    </head>
+    <body>
+        <div style="text-align: center; padding: 10px; font-size: 15px">Last activity change: """+str(datetime.datetime.now())+"""</div>
+        <table>
+            <tr class="header">
+                <th>Name</th>
+                <th>Reason</th>
+            </tr>
+    """
+    i = 0
+    for el in quarantinedFiles:
+        i += 1
+        accum += """
+        <tr class="data {oddity}">
+            <td>{name}</td>
+            <td>{reason}</td>
+        </tr>           
+        """.format(name=el.get('name'), reason=el.get('reason'), oddity='odd' if i%2==1 else 'even')
+    accum += """
+        </table>
+    </body>
+</html>
+    """
+    if settings.get('quarantineTextFile'):
+        with open(settings.get("quarantineTextFile"), 'w') as f:
+            f.write(accum)
+
 def scanStructure():
     _structure = {}
     _fileList = []
@@ -216,10 +312,13 @@ def scanStructure():
                     last['config'] = False
                 else:
                     last['config'] = config
-            if time.time() - os.stat(os.path.join(root,file)).st_ctime < 10:
-                log("Skipped " + file + ", too new", 'yellow')
-            else:
-                _fileList.append(os.path.join(root,file))
+            try:
+                if time.time() - os.stat(os.path.join(root,file)).st_ctime < 10:
+                    log("Skipped " + file + ", too new", 'yellow')
+                else:
+                    _fileList.append(os.path.join(root,file))
+            except:
+                log("File " + file + " disappeared", 'yellow')
     return _fileList, _structure
 
 def addToQueue(job):
@@ -267,10 +366,12 @@ def getRawFiles():
     return rawFiles
 
 def checkFiles(force=False):
-    global structure, rawFiles, fileList, conversionQueue, filesAddedYoutube, filesAdded, lastScanned,conversionObjs
+    global structure, rawFiles, fileList, conversionQueue, filesAddedYoutube, filesAdded, lastScanned,conversionObjs, quarantinedFiles
+
+    quarantinedFiles = []
 
     if time.time() - lastScanned < scanInterval and not force:
-        return
+        return False
     lastScanned = time.time()
 
     fileList, structure = scanStructure()
@@ -290,9 +391,6 @@ def checkFiles(force=False):
                 if not localSuffix:
                     localSuffix = rawSuffix
                 if quality == localSuffix and file not in filesAdded:
-                    # filesAdded.append(file)
-                    #if not firstLoop:
-                    #   log("Found new raw file, " + file, 'green')
                     config = getConfig(file)
                     metadata = getMetadata(file)
                     if not metadata:
@@ -304,8 +402,9 @@ def checkFiles(force=False):
                         except:
                             quarantineTime = 0
 
-                        if time.time() - quarantineTime < 86400:
+                        if time.time() - quarantineTime < 100:
                             log(file+" is in quarantine!", "red")
+                            quarantinedFiles.append({'name': file, 'reason': metadata.get('quarantineReason')})
                             continue
                         else:
                             log('Removing file '+ file + ' from quarantine', 'yellow')
@@ -314,7 +413,6 @@ def checkFiles(force=False):
                     if any(e in os.path.basename(file) for e in illegalChars):
                         log("ILLEGAL CHARS IN " + file, "red")
                         continue
-
 
                     # Check if videos are to be uploaded to YouTube
                     if config.get('youtubeUpload') == True and not metadata.get('enotelms:YouTubeUID') and not file in filesAddedYoutube:
@@ -387,7 +485,8 @@ def checkFiles(force=False):
                             log("Error generating thumbnail: " + thumbnail, 'magenta')
                         else:
                             log("Generated thumbnail: " + thumbnail , 'green')
-    #conversionQueue = sorted(conversionQueue, key=lambda k: k.get('priority'), reverse=True)
+    saveQueueText()
+    saveQuarantineText()
 
 def log(string, color="white"):
     now = datetime.datetime.now()
@@ -442,10 +541,13 @@ def anyVersionExists(file, rawSuffix):
 def versionExists(file, localSuffix, suffix):
     for filetype in fileTypes:
         filename = re.sub(localSuffix+".+$",suffix, file) + "." + filetype
-        if filename in fileList:
-            return True
-        elif os.path.isfile(filename) and os.stat(filename).st_ctime >= 10:
-            return True
+        try:
+            if filename in fileList:
+                return True
+            elif os.path.isfile(filename) and os.stat(filename).st_ctime >= 10:
+                return True
+        except:
+            traceback.print_exc()
     return False
 
 def jobQueued(file, suffix):
@@ -504,11 +606,11 @@ def currentlyProcessing():
             converting.append(status)
     return converting
 
-def setQuarantine(file):
-    writeMetadata(file, {"quarantine": int(time.time()), "conversion": "failed"})
+def setQuarantine(file, reason=False):
+    writeMetadata(file, {"quarantine": int(time.time()), "conversion": "failed", "quarantineReason": reason})
 
 def removeQuarantine(file):
-    writeMetadata(file, {"quarantine": False})
+    writeMetadata(file, {"quarantine": False, "quarantineReason": False})
 
 ##########################################
 ########### CUSTOM EXCEPTIONS ############
@@ -538,7 +640,6 @@ class videoConvert(threading.Thread):
         try:
             error = False
             writeMetadata(self.job['path'][0], {"conversion": "active"})
-            resolutionError = False
 
             self.job['duration'] = 0.0
 
@@ -553,6 +654,7 @@ class videoConvert(threading.Thread):
                 if not info:
                     error = True
                     log("Error getting video info for " + self.job['files'][key], "red")
+                    setQuarantine(self.job['path'][0], "Could not get video info")
                     break
 
                 try:
@@ -571,15 +673,23 @@ class videoConvert(threading.Thread):
                 width, height = info['width'], info['height']
                 if (width, height) != (1280, 720):
                     log("Videofile " + self.job['files'][key] + " has resolution " + str(width) + "x" + str(height) + " and was quarantined!", 'red')
-                    setQuarantine(self.job['path'][0])
-                    resolutionError = True
+                    setQuarantine(self.job['path'][0], "Video file has resolution %dx%d" % (width,height))
+                    error = True
                 if info['streams']['audio'] is None or info['streams']['video'] is None:
                     log("Couldn't find audio/video streams in file " + self.job['files'][key], 'red')
                     error = True
+                    setQuarantine(self.job['path'][0], "Missing video/audio stream in file")
                 else:
                     self.job['streams'].append(info['streams'])
-            if not resolutionError and not error:
-                if self.handleConversionJob(self.job):
+            
+            if not error:
+                try:
+                    self.handleConversionJob(self.job)
+                except Exception as e:
+                    error = True
+                    setQuarantine(self.job['path'][0], str(e))
+                    log(str(e), 'e')
+                else:
                     writeMetadata(element['path'][0], {"conversion": False})
                     # Adding job to youtubeUpload's queue. Should probably be handled by a watcher thread instead
                     youtubeConfig = self.job['config'].get("youtube")
@@ -589,10 +699,8 @@ class videoConvert(threading.Thread):
                         if self.job.get("preset") == youtubeConfig.get("uploadVersion"):
                             destination = destination[:-3] + "mov"
                             youtubeUpload.addToQueue(destination, youtubeConfig)
-                else:
-                    error = True
-            if error or resolutionError:
-                setQuarantine(self.job['path'][0])
+            
+            if error:
                 if self.job['config'].get("contactEmail"):
                     sendErrorReport(self.job['path'][0], self.job['config'].get('contactEmail'))
             self.currentlyConverting = False
@@ -616,7 +724,7 @@ class videoConvert(threading.Thread):
 
         self.drawText((width, height), strings).save(file)
 
-    def generateIntroOverlay(self, title, course, date,file, color):
+    def generateIntroOverlay(self, title, course, date, file, color, language):
         import Image, ImageDraw, ImageFont
 
         width, height = 1280, 720
@@ -654,7 +762,12 @@ class videoConvert(threading.Thread):
                 tempSegment = tempWord
         titleSegments.append(tempSegment)
 
-        date = datetime.datetime.strptime(date, "%Y-%m-%d %H:%M").strftime("%e. %B %Y")
+        videoLocale = "da_DK.UTF-8"
+        if language.lower() == "english":
+            videoLocale = "en_US.UTF-8"
+
+        with setLocale(videoLocale):
+            date = datetime.datetime.strptime(date, "%Y-%m-%d %H:%M").strftime("%e. %B %Y")
 
         strings = []
         for key,part in enumerate(titleSegments):
@@ -664,7 +777,7 @@ class videoConvert(threading.Thread):
 
         self.drawText((width,height), strings).save(file)
 
-    def generateOutroOverlays(self, producer, technician, lecturer, year, nodtubranding, file):
+    def generateOutroOverlays(self, producer, technician, lecturer, year, nodtubranding, file, language, license):
         import Image, ImageDraw, ImageFont
 
         width, height = 1280, 720
@@ -674,25 +787,34 @@ class videoConvert(threading.Thread):
         fontsize = 44
         textcolor = (164,164,164,255)
 
+        licenseFile = os.path.join(settings.get('scriptDir'), 'by-nc-nd.png')
+        licenseImg = None
+        if(os.path.isfile(licenseFile)):
+            licenseImg = Image.open(licenseFile)
+
         if nodtubranding:
             copyright = u""
         else:
-            copyright = u"\u00A9" + " "+year+" Danmarks Tekniske Universitet"
-        self.drawText((width, height), [[(-50, -40), copyright, textcolor, fontsize, font]]).save(file + "1.png")
+            copyright = u"\u00A9" + " "+year+" " + getLocalizedString('copyright', language)
+        
+        overlay1 = self.drawText((width, height), [[(-50, -40), copyright, textcolor, fontsize, font]])
+        if licenseImg:
+            overlay1.paste(licenseImg, (50, 625))
+        overlay1.save(file + "1.png")
 
         strings = []
 
         ypos = 200
         if(lecturer):
-            text = u"Forelæser: " + lecturer
+            text = u"%s: %s" % (lecturer, getLocalizedString('presenter', language))
             strings.append([(70, ypos), text, textcolor, fontsize-2, font])
             ypos += fontsize
         if(technician):
-            text = "Teknik: " + technician
+            text = "%s: %s" % (technician, getLocalizedString('technician', language))
             strings.append([(70, ypos), text, textcolor, fontsize-2, font])
             ypos += fontsize
         if(producer):
-            text = "Producer: " + producer
+            text = "%s: %s" % (producer, getLocalizedString('producer', language))
             strings.append([(70, ypos), text, textcolor, fontsize-2, font])
             ypos += fontsize
 
@@ -811,14 +933,12 @@ class videoConvert(threading.Thread):
 
         metadata = getMetadata(options['path'][0], unicode=True)
         if metadata == False:
-            raise metadataException({"type": "No metadata file found!!"})
+            raise metadataException("No metadata file found!!")
 
         title = metadata.get('title').replace('\x0D', '')
-
-        course_id = options['config'].get('course_id')
-        if not course_id:
-            course_id = " "
-
+        
+        # Get course_id from .txt metadata if present, and otherwise from convertConfig
+        course_id = metadata.get('course_id', options['config'].get('course_id', ' '))
 
         pubdate = metadata.get('pubDate')
         dirname = os.path.dirname(options['path'][0]) + "/"
@@ -827,6 +947,9 @@ class videoConvert(threading.Thread):
         technician = metadata.get('technician')
         lecturer = metadata.get('performers')
         year = datetime.datetime.strptime(pubdate, "%Y-%m-%d %H:%M").strftime("%Y")
+
+        language = metadata.get('language', 'Danish')
+        licence = metadata.get('license')
 
         nodtubranding = options['config'].get('nodtubranding')
         if not producer and not nodtubranding:
@@ -848,7 +971,7 @@ class videoConvert(threading.Thread):
                     for n in range(len(removeSection)/2):
                         removeSections.append({"start": float(removeSection[(n-1)*2]), "end": float(removeSection[(n-1)*2+1])})
                 else:
-                    raise metadataException({"type": "Syntax error in removeSection"})
+                    raise metadataException("Syntax error in removeSection")
 
             # In/out times for the first video file.
             try:
@@ -897,7 +1020,7 @@ class videoConvert(threading.Thread):
                         else: 
                             log("Ignoring lowerthird at " + str(lowerThirdsData[(n-1)*3]) + "s : Invalid time!", 'blue')
                 else:
-                    raise metadataException({"type": "Syntax error in lowerThird declaration"})
+                    raise metadataException("Syntax error in lowerThird declaration")
 
 
 
@@ -946,8 +1069,8 @@ class videoConvert(threading.Thread):
             logoOverlay = settings.get('defaultLogo')
 
         if title and course_id and pubdate:
-            self.generateIntroOverlay(title, course_id, pubdate, settings.get('scriptDir')+"Konverterede/" + options['path'][1] + '-introOverlay.png', titleColor)
-            self.generateOutroOverlays(producer, technician , lecturer, year, nodtubranding, settings.get('scriptDir')+"Konverterede/" + options['path'][1] + '-outroOverlay')
+            self.generateIntroOverlay(title, course_id, pubdate, settings.get('scriptDir')+"Konverterede/" + options['path'][1] + '-introOverlay.png', titleColor, language)
+            self.generateOutroOverlays(producer, technician , lecturer, year, nodtubranding, settings.get('scriptDir')+"Konverterede/" + options['path'][1] + '-outroOverlay', language, license)
             template = open(settings.get('scriptDir') + "video-convert/avisynth.avs", 'r').read().decode('utf-8')
             videoList = ""
             for i in range(len(options['files'])):
@@ -993,7 +1116,7 @@ class videoConvert(threading.Thread):
             script.close
             return template
         else:
-            raise metadataException({"type": "Either title, course_id or pubdate missing"})
+            raise metadataException("Either title, course_id or pubdate missing")
 
     def handleConversionJob(self,conversionJob):
         rawFiles = conversionJob['files']
@@ -1001,15 +1124,14 @@ class videoConvert(threading.Thread):
 
         missingOptions = validateList(options, ["width", "height", "quality", "suffix", "audiobitrate"])
         if missingOptions.__len__() > 0:
-            log("Missing options: " + ", ".join(missingOptions) + " for file " + rawFiles[0])
-            return False
+            raise metadataException("Missing options: " + ", ".join(missingOptions) + " for file " + rawFiles[0])
 
         conversionJob['outputFile'] = settings.get('scriptDir')+"Konverterede/" + conversionJob['path'][1] + "-"+ conversionJob['options']['suffix']
         outputFile = conversionJob['outputFile']
         finalDestination = re.sub(conversionJob['rawSuffix']+"\..+", conversionJob['options']['suffix'] + ".m4v",conversionJob['path'][0])
         if os.path.isfile(finalDestination) and not conversionJob['metadata'].get('reconvert') == "true":
-            log("File " + finalDestination + " already exists!")
-            return False
+            raise metadataException("File " + finalDestination + " already exists!")
+        
         success = False
         convertLog = ""
         outputFile = outputFile + ".m4v"
@@ -1018,17 +1140,11 @@ class videoConvert(threading.Thread):
             os.remove(outputFile)
 
         try:
-            #if not conversionJob['config'].get('branding') == True and len(rawFiles) == 1:
-            #    log("HandBrake conversion of " + rawFiles[0] + " to " + conversionJob['preset'])
-            #    convertLog = self.handbrakeConversion(conversionJob)
-            #else:
-            #    # BUG: Fallthrough if branding is disabled and more than one raw file is found!
             log("Avisynth conversion of " + rawFiles[0] + " to " + conversionJob['preset'])
             log("Job consists of " + str(len(rawFiles)) + " raw files")
             convertLog = self.avisynthConversion(conversionJob)
         except metadataException as e:
-            log("Error '"+e[0]['type']+"' for file " + rawFiles[0], 'red')
-            return False
+            raise metadataException("Error '"+str(e)+"' for file " + rawFiles[0], 'red')
         except executeException as e:
             print "error"
             print e
@@ -1046,10 +1162,8 @@ class videoConvert(threading.Thread):
             fp.write(convertLog)
             fp.close()
 
-        if success == True:
-            return True
-        else:
-            return False
+        if not success:
+            raise Exception("Internal error in handleConversionJob")
     def writeFFmetadata(self,options):
         path = self.winPath(options['path'][0])
         metadata = getMetadata(options['path'][0], unicode=True)
@@ -1326,36 +1440,41 @@ filesAdded = []
 filesAddedYoutube = []
 
 checkFiles()
-saveQueueText()
 
 youtube = youtubeUpload()
+youtube.daemon = True
 youtube.start()
 
 lastCount = 0
 while 1:
-    if conversionObjs.__len__() == 0 and conversionQueue.__len__() == 0:
-        log("No more work to do - exiting main loop")
-        break
-    with convertObjLock:
-        for thread in conversionObjs:
-            if not thread.is_alive():
-                thread.cleanup()
-                conversionObjs.remove(thread)
-        if conversionObjs.__len__() != lastCount:
-            checkFiles(force=True)
-            saveQueueText()
-        with conversionQueueLock:
-            if conversionObjs.__len__() != conversionThreads and conversionQueue.__len__() > 0:
-                        if conversionQueue[0]['path'][0] not in currentlyProcessing() and not (anyVersionExists(conversionQueue[0]['path'][0], conversionQueue[0]['rawSuffix']) and conversionObjs.__len__() > 0):
-                            log("Currently "+str(conversionQueue.__len__()) + " items queued for conversion.")
-                            printQueue()
-                            element = conversionQueue.pop(0)
+    try:
+        if conversionObjs.__len__() == 0 and conversionQueue.__len__() == 0:
+            log("No more work to do - exiting main loop")
+            break
+        with convertObjLock:
+            for thread in conversionObjs:
+                if not thread.is_alive():
+                    thread.cleanup()
+                    conversionObjs.remove(thread)
+            if conversionObjs.__len__() != lastCount:
+                checkFiles(force=True)
+            else:
+                checkFiles()
+            with conversionQueueLock:
+                if conversionObjs.__len__() != conversionThreads and conversionQueue.__len__() > 0:
+                            if conversionQueue[0]['path'][0] not in currentlyProcessing() and not (anyVersionExists(conversionQueue[0]['path'][0], conversionQueue[0]['rawSuffix']) and conversionObjs.__len__() > 0):
+                                log("Currently "+str(conversionQueue.__len__()) + " items queued for conversion.")
+                                printQueue()
+                                element = conversionQueue.pop(0)
 
-                            log("Created videoConvert object.")
-                            vidConv = videoConvert(element)
-                            conversionObjs.append(vidConv)
-                            vidConv.start()
-    lastCount = conversionObjs.__len__()
-    time.sleep(1)
+                                log("Created videoConvert object.")
+                                vidConv = videoConvert(element)
+                                conversionObjs.append(vidConv)
+                                vidConv.daemon = True
+                                vidConv.start()
+        lastCount = conversionObjs.__len__()
+        time.sleep(1)
+    except:
+        traceback.print_exc()
 
 mainThreadDone = True   

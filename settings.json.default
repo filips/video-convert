@@ -8,5 +8,6 @@
     "defaultIntro": "z:\\home\\video-convert\\intro.mov",
     "defaultOutro": "z:\\home\\video-convert\\outro.mov",
     "defaultLogo": "z:\\home\\video-convert\\dtulogo.png",
-    "queueTextFile": "/home/video-convert/podcasts/queue.html"
+    "queueTextFile": "/home/video-convert/podcasts/queue.html",
+    "quarantineTextFile": "/home/video-convert/podcasts/quarantine.html"
 }
