@@ -97,7 +97,7 @@ structure = {}
 conversionList = []
 
 # Video framerate. Should be configurable on a per-channel basis
-fps = 25 
+fps = 25
 
 # Minimum interval between folder scans
 scanInterval = 60
@@ -149,13 +149,13 @@ def setLocale(name):
         finally:
             locale.setlocale(locale.LC_ALL, oldLocale)
 
+# Returning localized strings will return empty strings if string could not be found.
 def getLocalizedString(string, language):
     if string in localizedStrings:
-        default = localizedStrings[string].get('Danish')
-        if language in localizedStrings[string]:
-            return localizedStrings[string].get(language, default)
+        default = localizedStrings[string].get('Danish', '')
+        return localizedStrings[string].get(language, default)
     else:
-        return None
+        return ''
 
 def saveQueueText():
     accum = ""
@@ -196,7 +196,8 @@ def saveQueueText():
         <meta http-equiv="refresh" content="5">
     </head>
     <body>
-        <div style="text-align: center; padding: 10px; font-size: 15px">Last activity change: """+str(datetime.datetime.now())+"""</div>
+        <div style="text-align: center; padding: 10px; font-size: 15px">Last activity change: """+str(datetime.datetime.now())+"""
+        <p><a href="" onClick='xmlhttp = new XMLHttpRequest(); xmlhttp.open("GET", "setRefresh.php", true); xmlhttp.send(); return false;'>Force update of list</a></p></div>
         <table>
             <tr class="header">
                 <th>#</th>
@@ -265,7 +266,9 @@ def saveQuarantineText():
         <meta http-equiv="refresh" content="5">
     </head>
     <body>
-        <div style="text-align: center; padding: 10px; font-size: 15px">Last activity change: """+str(datetime.datetime.now())+"""</div>
+        <div style="text-align: center; padding: 10px; font-size: 15px">Last activity change: """+str(datetime.datetime.now())+"""
+        <p><a href="" onClick='xmlhttp = new XMLHttpRequest(); xmlhttp.open("GET", "setRefresh.php", true); xmlhttp.send(); return false;'>Force update of list</a></p></div>
+        </div>
         <table>
             <tr class="header">
                 <th>Name</th>
@@ -342,6 +345,7 @@ def printQueue():
         log(str(key+1) + "\t" + el['preset'] + "\t" + el['metadata']['pubDate'] + "\t" + str(el['priority']) + "\t" + el['path'][0], 'green')
 
 def getRawFiles():
+    startTime = time.time()
     rawFiles = {}
     patterns = {}
     patterns[rawSuffix] = re.compile("^.+\/([^\/]+)-"+rawSuffix+"(\d)?\.([^\.^-]+)$")
@@ -363,6 +367,7 @@ def getRawFiles():
                 index = 0
 
             rawFiles[parts.group(1)][int(index)] = parts.group(0)
+    log("getRawFiles took %f seconds" % (time.time() - startTime))
     return rawFiles
 
 def checkFiles(force=False):
@@ -375,6 +380,8 @@ def checkFiles(force=False):
     lastScanned = time.time()
 
     fileList, structure = scanStructure()
+    log("scanStructure took %f seconds" % (time.time() - lastScanned))
+
     rawFiles = getRawFiles()
 
     illegalChars = "/?<>\*|”"
@@ -402,7 +409,7 @@ def checkFiles(force=False):
                         except:
                             quarantineTime = 0
 
-                        if time.time() - quarantineTime < 100:
+                        if time.time() - quarantineTime < 43200:
                             log(file+" is in quarantine!", "red")
                             quarantinedFiles.append({'name': file, 'reason': metadata.get('quarantineReason')})
                             continue
@@ -419,31 +426,35 @@ def checkFiles(force=False):
                         filesAddedYoutube.append(file)
                         youtube = config.get('youtube');
                         if youtube:
-                            if youtube.get('uploadVersion'):
-                                version = youtube.get('uploadVersion')
-                            else:
-                                version = "720p"
-                            config['youtube']['uploadVersion'] = version
-                            if versionExists(file, localSuffix, version):
-                                username = youtube.get('username')
-                                password = youtube.get('password')
-                                developer_key = youtube.get('developerKey')
-                                playlist = youtube.get('playlist')
-                                if username and password and developer_key:
-                                    filename = file.replace(localSuffix, version)
+                            if (youtube.get('manualSelection') and metadata.get('youtubeUpload',"") == "true") or not youtube.get('manualSelection'):
+                                if youtube.get('uploadVersion'):
+                                    version = youtube.get('uploadVersion')
+                                else:
+                                    version = "720p"
+                                config['youtube']['uploadVersion'] = version
+                                if versionExists(file, localSuffix, version):
+                                    username = youtube.get('username')
+                                    password = youtube.get('password')
+                                    developer_key = youtube.get('developerKey')
 
-                                    for type in fileTypes:
-                                        tFile = filename[:-3] + type
-                                        if os.path.isfile(tFile):
-                                            filename = tFile
-                                            break;
-                                    youtubeUpload.addToQueue(filename, youtube.copy())
+                                    playlist = youtube.get('playlist')
+                                    if username and password and developer_key:
+                                        filename = file.replace(localSuffix, version)
+
+                                        for type in fileTypes:
+                                            tFile = filename[:-3] + type
+                                            if os.path.isfile(tFile):
+                                                filename = tFile
+                                                break;
+                                        youtubeUpload.addToQueue(filename, youtube.copy())
                     # Check if videos are to be converted
                     if config.get("convert") == True:
                         reconverting = metadata.get('reconvert') == "true"
                         for format in config.get('formats'):
                             preset = config.get('presets').get(format)
                             if preset:
+                                if not preset.get('fps'):
+                                    preset['fps'] = fps
                                 if not versionExists(file, localSuffix, preset.get('suffix')) or reconverting:
                                     if reconverting:
                                         log("Reconverting file " + file, 'yellow')
@@ -463,7 +474,7 @@ def checkFiles(force=False):
                                                     if reconverting:
                                                         priority -= 1000
                                                     
-                                                    conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config, "rawSuffix": localSuffix, "priority": priority, "metadata": metadata, "pubDate": timeValue}
+                                                    conversionJob = {"path": data, "files": rawFiles[data[1]], "options": preset,"preset": format, "config": config, "rawSuffix": localSuffix, "priority": priority, "metadata": metadata, "pubDate": timeValue, "extension": ext}
                                                     addToQueue(conversionJob)      
                             else:
                                 log("Format '" + format + "' not found. Available ones are (" + ', '.join(format for format in config.get('presets')) + ")")
@@ -530,6 +541,9 @@ def isRunning():
         return False
 
 def anyVersionExists(file, rawSuffix):
+    # Use system resources better. If conversions are too slow, lower conversionThreads parameter
+    return False
+
     basename = re.split('-\w+\.\w+$',file)[0]
     for fileName in fileList:
         # Temporary workaround for faulty regex.
@@ -688,17 +702,19 @@ class videoConvert(threading.Thread):
                 except Exception as e:
                     error = True
                     setQuarantine(self.job['path'][0], str(e))
-                    log(str(e), 'red')
+                    log(traceback.format_exc(), 'red')
                 else:
                     writeMetadata(element['path'][0], {"conversion": False})
                     # Adding job to youtubeUpload's queue. Should probably be handled by a watcher thread instead
                     youtubeConfig = self.job['config'].get("youtube")
                     destination = re.sub(self.job['rawSuffix'], self.job['options']['suffix'],self.job['path'][0])
 
+                    metadata = getMetadata(element['path'][0])
                     if youtubeConfig and self.job['config'].get('youtubeUpload') == True:
-                        if self.job.get("preset") == youtubeConfig.get("uploadVersion"):
-                            destination = destination[:-3] + "mov"
-                            youtubeUpload.addToQueue(destination, youtubeConfig)
+                          if (youtubeConfig.get('manualSelection') and metadata.get('youtubeUpload',"") == "true") or not youtubeConfig.get('manualSelection'):
+                            if self.job.get("preset") == youtubeConfig.get("uploadVersion"):
+                                destination = destination[:-3] + "mov"
+                                youtubeUpload.addToQueue(destination, youtubeConfig)
             
             if error:
                 if self.job['config'].get("contactEmail"):
@@ -806,15 +822,15 @@ class videoConvert(threading.Thread):
 
         ypos = 200
         if(lecturer):
-            text = u"%s: %s" % (lecturer, getLocalizedString('presenter', language))
+            text = u"%s: %s" % (getLocalizedString('presenter', language), lecturer)
             strings.append([(70, ypos), text, textcolor, fontsize-2, font])
             ypos += fontsize
         if(technician):
-            text = "%s: %s" % (technician, getLocalizedString('technician', language))
+            text = "%s: %s" % (getLocalizedString('technician', language), technician)
             strings.append([(70, ypos), text, textcolor, fontsize-2, font])
             ypos += fontsize
         if(producer):
-            text = "%s: %s" % (producer, getLocalizedString('producer', language))
+            text = "%s: %s" % (getLocalizedString('producer', language), producer)
             strings.append([(70, ypos), text, textcolor, fontsize-2, font])
             ypos += fontsize
 
@@ -888,6 +904,8 @@ class videoConvert(threading.Thread):
 
             streams = {"video": None, "audio": None}
             
+            audioStreams = []
+
             for stream in info.get("streams"):
                 if stream.get("codec_type") == "video":
                     videoStreams += 1
@@ -896,8 +914,13 @@ class videoConvert(threading.Thread):
                         height = stream.get("height")
                         streams['video'] = stream.get("index")
                 elif stream.get("codec_type") == "audio":
-                    streams['audio'] = stream.get("index")
+                    audioStreams.append(stream.get("index"))
             
+            if len(audioStreams) == 1:
+                streams['audio'] = [audioStreams[0]]
+            elif len(audioStreams) > 1:
+                streams['audio'] = audioStreams[0:2]
+
             videoinfo = {
                 "videoStreams": videoStreams,
                 "height": int(height),
@@ -1102,7 +1125,7 @@ class videoConvert(threading.Thread):
                 brandClips=branding, 
                 videoList=videoList, 
                 correctH264Levels=H264Correction,
-                fps=fps,
+                fps=int(options['options']['fps']),
                 introoverlay=self.winPath(settings.get('scriptDir')+"Konverterede/" + options['path'][1] + '-introOverlay.png'),
                 outrooverlay1=self.winPath(settings.get('scriptDir')+"Konverterede/" + options['path'][1] + '-outroOverlay1.png'),
                 outrooverlay2=self.winPath(settings.get('scriptDir')+"Konverterede/" + options['path'][1] + '-outroOverlay2.png'),
@@ -1122,19 +1145,19 @@ class videoConvert(threading.Thread):
         rawFiles = conversionJob['files']
         options = conversionJob['options']
 
-        missingOptions = validateList(options, ["width", "height", "quality", "suffix", "audiobitrate"])
+        missingOptions = validateList(options, ["width", "height", "quality", "suffix", "audiobitrate", "fps"])
         if missingOptions.__len__() > 0:
             raise metadataException("Missing options: " + ", ".join(missingOptions) + " for file " + rawFiles[0])
 
         conversionJob['outputFile'] = settings.get('scriptDir')+"Konverterede/" + conversionJob['path'][1] + "-"+ conversionJob['options']['suffix']
         outputFile = conversionJob['outputFile']
-        finalDestination = re.sub(conversionJob['rawSuffix']+"\..+", conversionJob['options']['suffix'] + ".m4v",conversionJob['path'][0])
+        finalDestination = re.sub(conversionJob['rawSuffix']+"\..+", conversionJob['options']['suffix'] + "." + conversionJob['extension'],conversionJob['path'][0])
         if os.path.isfile(finalDestination) and not conversionJob['metadata'].get('reconvert') == "true":
             raise metadataException("File " + finalDestination + " already exists!")
         
         success = False
         convertLog = ""
-        outputFile = outputFile + ".m4v"
+        outputFile = outputFile + "." + conversionJob['extension']
         if os.path.isfile(outputFile):
             log("Removed outputFile prior to encoding ...")
             os.remove(outputFile)
@@ -1149,6 +1172,7 @@ class videoConvert(threading.Thread):
             print "error"
             print e
             log("Encoding of " + outputFile + " failed!", 'red')
+            raise
         else:
             if os.path.isfile(outputFile):
                 log("Encoding of " + outputFile + " succeded!", 'green')
@@ -1158,7 +1182,7 @@ class videoConvert(threading.Thread):
                 log("Encoding of " + outputFile + " failed (no output file)!", 'red')
 
         if convertLog:
-            fp = open(outputFile.replace(".m4v",".log"), "w")
+            fp = open(outputFile.replace("." + conversionJob['extension'],".log"), "w")
             fp.write(convertLog)
             fp.close()
 
@@ -1210,7 +1234,7 @@ class videoConvert(threading.Thread):
         options = job['options']
         streams = job['streams']
         inputFile = job['path'][0]
-        outputFile = job['outputFile'] + '.m4v'
+        outputFile = job['outputFile'] + "." + job['extension']
         audioFile = job['outputFile'] + '.wav'
         videoFile = job['outputFile'] + '.264'
         avsScript = job['outputFile'] + '.avs'
@@ -1221,8 +1245,11 @@ class videoConvert(threading.Thread):
         for key in job['files']:
             file = job['files'][key]
             stream = streams[index]
-            execLog += self.executeCommand("ffmpeg -y -i " + file + " -map 0:"+str(stream['video'])+" -map 0:"+str(stream['audio'])+" -acodec copy -vcodec copy " + file + ".new.m4v", includeStderr=True)
-            newlist[key] = file + ".new.m4v"
+            if len(stream['audio']) == 1:
+                execLog += self.executeCommand("ffmpeg -y -i " + file + " -map 0:"+str(stream['video'])+" -map 0:"+str(stream['audio'][0])+" -c:a copy -c:v copy " + file + ".new." + job['extension'], includeStderr=True)
+            else:
+                execLog += self.executeCommand("ffmpeg -y -i " + file + " -map 0:"+str(stream['video'])+"  -filter_complex '[0:"+str(stream['audio'][0])+"][0:"+str(stream['audio'][1])+"]amerge[aout]' -map '[aout]' -c:a pcm_s24le -c:v copy " + file + ".new." + job['extension'], includeStderr=True)
+            newlist[key] = file + ".new." + job['extension']
             index += 1
         
         job['files'] = newlist
@@ -1234,15 +1261,15 @@ class videoConvert(threading.Thread):
         else:
             ffmetaFile = None
         try:
-            log('Running avs2pipe audio.. ('+outputFile+')', 'blue')
-            execLog += self.executeCommand("wine avs2pipe audio \"" + avsScript + "\" > \"" + audioFile + "\"", niceness=True, includeStderr=True)
-            log('Running avs2yuv video.. ('+outputFile+')', 'blue')
-            execLog += self.executeCommand("wine avs2yuv \""+ avsScript +"\" - | x264 --fps "+str(fps)+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -", niceness=True, includeStderr=True)
+            log('Running avs2pipemod audio.. ('+outputFile+')', 'blue')
+            execLog += self.executeCommand("wine avs2pipemod -wav \"" + avsScript + "\" > \"" + audioFile + "\"", niceness=True, includeStderr=True)
+            log('Running avs2pipemod video.. ('+outputFile+')', 'blue')
+            execLog += self.executeCommand("wine avs2pipemod -y4mp \""+ avsScript +"\" | x264 --fps "+str(int(options['fps']))+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -", niceness=True, includeStderr=True)
             log('Muxing with ffmpeg.. ('+outputFile+')', 'blue')
             if ffmetaFile:
-                execLog += self.executeCommand("ffmpeg -y -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -i \"" +ffmetaFile+ "\" -map_metadata 2 -vcodec copy -strict -2 \""+outputFile+"\" ", niceness=True, includeStderr=True)
+                execLog += self.executeCommand("ffmpeg -y -r "+str(int(options['fps']))+" -i \""+videoFile+"\" -i \""+audioFile+"\" -i \"" +ffmetaFile+ "\" -map_metadata 2 -vcodec copy -strict -2 \""+outputFile+"\" ", niceness=True, includeStderr=True)
             else:
-                execLog += self.executeCommand("ffmpeg -y -r "+str(fps)+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\" ", niceness=True, includeStderr=True)
+                execLog += self.executeCommand("ffmpeg -y -r "+str(int(options['fps']))+" -i \""+videoFile+"\" -i \""+audioFile+"\" -vcodec copy -strict -2 \""+outputFile+"\" ", niceness=True, includeStderr=True)
         except Exception:
             raise
         finally:
@@ -1265,7 +1292,7 @@ class videoConvert(threading.Thread):
 
         options = job['options']
         handBrakeArgs = "-e x264 -q " + str(options['quality']) + " -B " + str(options['audiobitrate']) + " -w " + str(options['width']) + " -l " + str(options['height'])  
-        cmd = HandBrakeCLI + " --cpu " + str(CPUS) + " " + handBrakeArgs + " -r "+str(fps)+" -i '" + job['path'][0] + "' -o '" + job['outputFile'] + ".m4v'"
+        cmd = HandBrakeCLI + " --cpu " + str(CPUS) + " " + handBrakeArgs + " -r "+str(fps)+" -i '" + job['path'][0] + "' -o '" + job['outputFile'] + "."+job['extension']+"'"
         return self.executeCommand(cmd, niceness=True, includeStderr=True)
 
 
@@ -1456,10 +1483,20 @@ while 1:
                 if not thread.is_alive():
                     thread.cleanup()
                     conversionObjs.remove(thread)
+            forceUpdateFile = os.path.join(settings.get('podcastPath'), 'CHECK_FILES')
             if conversionObjs.__len__() != lastCount:
                 checkFiles(force=True)
-            else:
-                checkFiles()
+            elif os.path.isfile(forceUpdateFile):
+                updateState = ""
+                with open(forceUpdateFile, 'r+') as f:
+                    updateState = f.read();
+                    f.seek(0)
+                    f.truncate()
+                    f.write("FALSE")
+                if updateState == "TRUE":
+                    log("Forced update of files from website..", 'blue')
+                    checkFiles(force=True)
+            
             with conversionQueueLock:
                 if conversionObjs.__len__() != conversionThreads and conversionQueue.__len__() > 0:
                             if conversionQueue[0]['path'][0] not in currentlyProcessing() and not (anyVersionExists(conversionQueue[0]['path'][0], conversionQueue[0]['rawSuffix']) and conversionObjs.__len__() > 0):
@@ -1475,6 +1512,6 @@ while 1:
         lastCount = conversionObjs.__len__()
         time.sleep(1)
     except:
-        traceback.print_exc()
+        log(traceback.format_exc(),'red')
 
 mainThreadDone = True   
