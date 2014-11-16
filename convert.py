@@ -805,7 +805,8 @@ class videoConvert(threading.Thread):
 
         licenseFile = os.path.join(settings.get('scriptDir'), 'by-nc-nd.png')
         licenseImg = None
-        if(os.path.isfile(licenseFile)):
+        
+        if(os.path.isfile(licenseFile)) and license and license.lower() == "creative commons":
             licenseImg = Image.open(licenseFile)
 
         if nodtubranding:
@@ -972,7 +973,7 @@ class videoConvert(threading.Thread):
         year = datetime.datetime.strptime(pubdate, "%Y-%m-%d %H:%M").strftime("%Y")
 
         language = metadata.get('language', 'Danish')
-        licence = metadata.get('license')
+        license = metadata.get('license')
 
         nodtubranding = options['config'].get('nodtubranding')
         if not producer and not nodtubranding:
@@ -1028,7 +1029,7 @@ class videoConvert(threading.Thread):
                     else:
                         newRemoveSections.append(remSec[1])
 
-            for remSec in newRemoveSections:
+            for remSec in reversed(newRemoveSections):
                     removeSectionCmd += 'content = removeSection(content, '+str(remSec['start'])+', '+str(remSec['end'])+')\n'
 
             lowerThirdsData = metadata.get('lowerThirds')
@@ -1264,7 +1265,7 @@ class videoConvert(threading.Thread):
             log('Running avs2pipemod audio.. ('+outputFile+')', 'blue')
             execLog += self.executeCommand("wine avs2pipemod -wav \"" + avsScript + "\" > \"" + audioFile + "\"", niceness=True, includeStderr=True)
             log('Running avs2pipemod video.. ('+outputFile+')', 'blue')
-            execLog += self.executeCommand("wine avs2pipemod -y4mp \""+ avsScript +"\" | x264 --fps "+str(int(options['fps']))+" --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -", niceness=True, includeStderr=True)
+            execLog += self.executeCommand("wine avs2pipemod -y4mp \""+ avsScript +"\" | x264 --fps "+str(int(options['fps']))+" --threads 2 --stdin y4m --output \""+videoFile+"\" --bframes 0 -q "+str(options['quality'])+" --video-filter resize:"+str(options['width'])+","+str(options['height'])+" -", niceness=True, includeStderr=True)
             log('Muxing with ffmpeg.. ('+outputFile+')', 'blue')
             if ffmetaFile:
                 execLog += self.executeCommand("ffmpeg -y -r "+str(int(options['fps']))+" -i \""+videoFile+"\" -i \""+audioFile+"\" -i \"" +ffmetaFile+ "\" -map_metadata 2 -vcodec copy -strict -2 \""+outputFile+"\" ", niceness=True, includeStderr=True)

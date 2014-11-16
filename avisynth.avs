@@ -22,9 +22,10 @@ global correctH264Levels = {correctH264Levels}
 global removedFrameOffset = 0
 
 introOutro ? Eval("""
-	intro = FFmpegSource2("{intro}", atrack=-1, fpsnum=framerate).ConvertToYUY2()
-	outro = FFmpegSource2("{outro}", atrack=-1, fpsnum=framerate).ConvertToYUY2()
-
+	intro = FFmpegSource2("{intro}", atrack=-1, threads=1).ConvertToYUY2()
+	outro = FFmpegSource2("{outro}", atrack=-1, threads=1).ConvertToYUY2()
+	intro = ChangeFPS(intro, framerate)
+	outro = ChangeFPS(outro, framerate)
 	introtext = ImageSource("{introoverlay}")
 	intromask = ImageSource("{introoverlay}",pixel_type="RGB32").ShowAlpha(pixel_type="YUY2")
 	intro = Overlay(intro, introtext, mask=intromask)
@@ -73,7 +74,8 @@ function overlayImage(clip base, string image, int startframe, int endframe, int
 }}
 
 function addLowerThird(clip, start, image) {{
-	overlayClip = FFmpegSource2("{nametag}", fpsnum=framerate, threads=1)
+    overlayClip = FFmpegSource2("{nametag}", threads=1)
+    overlayClip = ChangeFPS(overlayClip, framerate)
     overlayClip = Trim(overlayClip, 0, framerate*6)
     
     frame = Floor(start * framerate + 1.0)
@@ -94,12 +96,13 @@ function addLowerThird(clip, start, image) {{
 function brandClip(clip c) {{
 	logo = ImageSource("{logoOverlay}")
 	logomask = ImageSource("{logoOverlay}",pixel_type="RGB32").ShowAlpha(pixel_type="RGB32")
-	Overlay(c, logo, 1160, 40, mask=logomask)
+	Overlay(c, logo, Width(c) - Width(logo) - 57, 40, mask=logomask)
 }}
 
 function addVideoClip(string s, float start, float end) {{
-	clip = FFmpegSource2(s,atrack=-1, fpsnum=framerate, threads=1).ConvertToYUY2()
-	clip = Trim(clip, Round(start * framerate), Framecount(clip) - Round(end * framerate))
+	clip = FFmpegSource2(s,atrack=-1, threads=1).ConvertToYUY2()
+	clip = ChangeFPS(clip, framerate)
+	clip = Trim(clip, Round(start * framerate), FrameCount(clip) - Round(end * framerate))
 	brandClips ? Eval("""
 		clip = brandClip(clip)
 	""") : ""	
@@ -107,16 +110,24 @@ function addVideoClip(string s, float start, float end) {{
 }}
 
 function removeSection(clip clip, float start, float end) {{
-    startFrame = Round(start * framerate) - removedFrameOffset
-    endFrame = Round(end * framerate) - removedFrameOffset
+    startFrame = Round(start * framerate)
+    endFrame = Round(end * framerate)
 
     startFrame > 0 ? Eval("""
-        clip=Trim(clip, 0, startFrame) ++ Trim(clip, endFrame, 0)
+        Abs(FrameCount(clip) - endFrame) < 2 ? Eval("
+            clip = Trim(clip, 0, startFrame)
+        ") : Eval("
+            clip=Trim(clip, 0, startFrame) ++ Trim(clip, endFrame, 0)
+        ")
     """) : Eval("""
-        clip=Trim(clip, endFrame, 0)
+        Abs(FrameCount(clip) - endFrame) < 2 ? Eval("
+            clip
+        ") : Eval("
+            clip=Trim(clip, endFrame, 0)
+        ")
     """)
-	
-    removedFrameOffset = removedFrameOffset + (endFrame - startFrame)
+
+
     clip
 }}
 
