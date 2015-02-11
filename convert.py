@@ -1316,6 +1316,7 @@ class youtubeUpload (threading.Thread):
                     try:
                         self.yt_service = self.authenticate(element['username'],element['password'],element['developerKey'])
                     except gdata.service.BadAuthentication:
+                        traceback.print_exc()
                         log("ERROR: Wrong credentials for YouTube account '%s'" % element['username'], "red")
                     except gdata.service.Error as e:
                         traceback.print_exc()
@@ -1470,7 +1471,6 @@ filesAddedYoutube = []
 checkFiles()
 
 youtube = youtubeUpload()
-youtube.daemon = True
 youtube.start()
 
 lastCount = 0
@@ -1508,7 +1508,6 @@ while 1:
                                 log("Created videoConvert object.")
                                 vidConv = videoConvert(element)
                                 conversionObjs.append(vidConv)
-                                vidConv.daemon = True
                                 vidConv.start()
         lastCount = conversionObjs.__len__()
         time.sleep(1)

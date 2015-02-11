@@ -128,6 +128,7 @@ function removeSection(clip clip, float start, float end) {{
     """)
 
 
+
     clip
 }}
 
