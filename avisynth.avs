@@ -15,23 +15,26 @@
 
 LoadPlugin("C:\Program Files\AviSynth 2.5\plugins\ffms2.dll")
 
-global introOutro = {introOutro}
-global brandClips = {brandClips}
+global enableIntro = {enableIntro}
+global enableOutro = {enableOutro}
+global addLogo = {addLogo}
 global framerate  = {fps}
 global correctH264Levels = {correctH264Levels}
 global removedFrameOffset = 0
 
-introOutro ? Eval("""
+enableIntro ? Eval("""
 	intro = FFmpegSource2("{intro}", atrack=-1, threads=1).ConvertToYUY2()
-	outro = FFmpegSource2("{outro}", atrack=-1, threads=1).ConvertToYUY2()
 	intro = ChangeFPS(intro, framerate)
-	outro = ChangeFPS(outro, framerate)
 	introtext = ImageSource("{introoverlay}")
 	intromask = ImageSource("{introoverlay}",pixel_type="RGB32").ShowAlpha(pixel_type="YUY2")
 	intro = Overlay(intro, introtext, mask=intromask)
+""") : ""
 
-	outro = overlayImage(outro, "{outrooverlay1}", 0, 0, 10, 0)
-	outro = overlayImage(outro, "{outrooverlay2}", 65 , 120, 10, 10)
+enableOutro ? Eval("""
+    outro = FFmpegSource2("{outro}", atrack=-1, threads=1).ConvertToYUY2()
+    outro = ChangeFPS(outro, framerate)
+    outro = overlayImage(outro, "{outrooverlay1}", 0, 0, 10, 0)
+    outro = overlayImage(outro, "{outrooverlay2}", 65 , 120, 10, 10)
 """) : ""
 
 function overlayImage(clip base, string image, int startframe, int endframe, int fadeStart, int fadeEnd) {{
@@ -76,7 +79,7 @@ function overlayImage(clip base, string image, int startframe, int endframe, int
 function addLowerThird(clip, start, image) {{
     overlayClip = FFmpegSource2("{nametag}", threads=1)
     overlayClip = ChangeFPS(overlayClip, framerate)
-    overlayClip = Trim(overlayClip, 0, framerate*6)
+    overlayClip = Trim(overlayClip, 0, framerate*9)
     
     frame = Floor(start * framerate + 1.0)
     before = Trim(clip, 0, frame)
@@ -93,7 +96,7 @@ function addLowerThird(clip, start, image) {{
 
 }}
 
-function brandClip(clip c) {{
+function addLogo(clip c) {{
 	logo = ImageSource("{logoOverlay}")
 	logomask = ImageSource("{logoOverlay}",pixel_type="RGB32").ShowAlpha(pixel_type="RGB32")
 	Overlay(c, logo, Width(c) - Width(logo) - 57, 40, mask=logomask)
@@ -103,8 +106,8 @@ function addVideoClip(string s, float start, float end) {{
 	clip = FFmpegSource2(s,atrack=-1, threads=1).ConvertToYUY2()
 	clip = ChangeFPS(clip, framerate)
 	clip = Trim(clip, Round(start * framerate), FrameCount(clip) - Round(end * framerate))
-	brandClips ? Eval("""
-		clip = brandClip(clip)
+	addLogo ? Eval("""
+		clip = addLogo(clip)
 	""") : ""	
 	ResampleAudio(clip, 48000)
 }}
@@ -142,10 +145,16 @@ correctH264Levels ? Eval("""
 	content = Levels(content, 0, 1.0, 243, 0, 255)
 """) : Eval("")
 
-introOutro ? Eval("""
-	output = intro ++ content ++ outro
+enableIntro ? Eval("""
+	output = intro ++ content
 """) : Eval("""
 	output = content
+""")
+
+enableOutro ? Eval("""
+    output = content ++ outro
+""") : Eval("""
+    output = content
 """)
 
 output
