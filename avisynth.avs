@@ -152,7 +152,7 @@ enableIntro ? Eval("""
 """)
 
 enableOutro ? Eval("""
-    output = content ++ outro
+    output = output ++ outro
 """) : Eval("""
     output = content
 """)

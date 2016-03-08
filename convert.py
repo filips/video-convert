@@ -881,8 +881,6 @@ class videoConvert(threading.Thread):
             imtext = Image.new("L", imsize, 0)
             text = unicode(text)
 
-            print(text)
-
             draw = aggdraw.Draw(imtext)
             font = aggdraw.Font((255,255,255), font, size=size)
             
@@ -1104,20 +1102,27 @@ class videoConvert(threading.Thread):
             enableIntro = False
             enableOutro = False
 
-        if options['config'].get('enableIntro') == True:
-            enableIntro = True
-        else:
-            enableIntro = False
+        setInt = options['config'].get('enableIntro')
+        setOut = options['config'].get('enableOutro')
+        setLogo = options['config'].get('enableLogo')
 
-        if options['config'].get('enableOutro') == True:
-            enableOutro = True
-        else:
-            enableOutro = False
+        if setInt != None:
+            if setInt:
+                enableIntro = True
+            else:
+                enableIntro = False
 
-        if options['config'].get('enableLogo') == True:
-            enableLogo = True
-        else:
-            enableLogo = False
+        if setOut != None:
+            if setOut:
+                enableOutro = True
+            else:
+                enableOutro = False
+
+        if setLogo != None:
+            if setLogo:
+                enableLogo = True
+            else:
+                enableLogo = False
 
         if metadata.get('H264ProRecorderDynamicRangeCorrection') == "true":
             log("Applying H264 Recorder specific dynamic range correction to " + options['path'][0])
@@ -1147,12 +1152,11 @@ class videoConvert(threading.Thread):
             outro = settings.get('defaultOutro')
         
         logo = metadata.get('logo')
-        if not logo:
-            logo = ""
 
         if logo == "false":
             branding = False
             logoOverlay = ""
+            enableLogo = False 
         elif os.path.isfile(dirname + "logo" + logo + ".png"):
             logoOverlay = self.winPath(dirname + "logo" + logo + ".png")
         else:
