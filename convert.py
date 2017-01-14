@@ -1153,12 +1153,12 @@ class videoConvert(threading.Thread):
         
         logo = metadata.get('logo')
 
-        if logo == "false":
-            branding = False
-            logoOverlay = ""
-            enableLogo = False 
-        elif os.path.isfile(dirname + "logo" + logo + ".png"):
-            logoOverlay = self.winPath(dirname + "logo" + logo + ".png")
+        if logo:
+            if logo == "false":
+                logoOverlay = ""
+                enableLogo = False
+            elif os.path.isfile(dirname + "logo" + logo + ".png"):
+                logoOverlay = self.winPath(dirname + "logo" + logo + ".png")
         else:
             logoOverlay = settings.get('defaultLogo')
 
