@@ -18,7 +18,7 @@
 
 import re, os, fcntl
 
-def getMetadata(file, unicode=False):
+def getMetadata(file):
 	metafile = re.split('-\w+\.\w+$',file)[0] + ".txt"
 	if os.path.isfile(metafile):
 		with open(metafile, 'r') as fp:
@@ -27,8 +27,6 @@ def getMetadata(file, unicode=False):
 			fp.close()
 		metadata = {}
 		for line in lines:
-			if unicode==True:
-				line = line.decode('utf-8')
 			parts = [x.strip() for x in line.split('=', 1)]
 			if len(parts) == 2 and not parts[1].startswith('['):
 				submatch = re.search('^{(.+)}$', parts[1])
@@ -63,8 +61,8 @@ def writeMetadata(file, data):
 					lines[key] = line + '\n'
 			for idx in data:
 				if data[idx] != False:
-					unicodeLine = idx+" = " + unicode(data[idx]) + "\n"
-					lines.append(unicodeLine.encode('utf-8'))
+					unicodeLine = idx+" = " + str(data[idx]) + "\n"
+					lines.append(str(unicodeLine))
 			f.close()
 		try:
 			with open(metafile, 'w') as f:

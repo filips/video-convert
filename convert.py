@@ -1,4 +1,4 @@
-#!/usr/bin/env python3 -u
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 # Copyright (c) 2014 Filip Sandborg-Olsen <filipsandborg@gmail.com>
@@ -24,10 +24,8 @@ import smtplib
 import threading
 from collections import deque
 import traceback
-import pprint
 
 from PIL import Image, ImageFont, ImageDraw, ImageChops
-#import gdata.youtube.service
 import json
 from termcolor import colored
 
@@ -35,6 +33,15 @@ from metadata import getMetadata, writeMetadata
 import getopt
 
 from contextlib import contextmanager
+
+# Google Data API for YouTube Integration
+from apiclient.discovery import build
+from apiclient.errors import HttpError
+from apiclient.http import MediaFileUpload
+from oauth2client.client import flow_from_clientsecrets, GoogleCredentials
+import httplib2, http.client
+
+httplib2.RETRIES = 1
 
 ##########################################
 ########### CONSTANTS ####################
@@ -58,7 +65,9 @@ if os.path.isfile(settingsFile):
             "defaultIntro",
             "defaultOutro",
             "defaultLogo",
-            "queueTextFile"
+            "queueTextFile",
+            "youtubeAuth",
+            "youtubeSecrets"
         ]
         for field in requiredFields:
             if not field in settings:
@@ -442,12 +451,10 @@ def checkFiles(force=False):
                                     version = "720p"
                                 config['youtube']['uploadVersion'] = version
                                 if versionExists(file, localSuffix, version):
-                                    username = youtube.get('username')
-                                    password = youtube.get('password')
-                                    developer_key = youtube.get('developerKey')
+                                    alias = youtube.get('alias')
 
                                     playlist = youtube.get('playlist')
-                                    if username and password and developer_key:
+                                    if alias:
                                         filename = file.replace(localSuffix, version)
 
                                         for type in fileTypes:
@@ -455,7 +462,9 @@ def checkFiles(force=False):
                                             if os.path.isfile(tFile):
                                                 filename = tFile
                                                 break;
-                                        #youtubeUpload.addToQueue(filename, youtube.copy())
+                                        youtubeUpload.addToQueue(filename, youtube.copy())
+                                    else:
+                                        log('ERROR: No YouTube alias specified for file "{}"'.format(file))
                     # Check if videos are to be converted
                     if config.get("convert") == True:
                         reconverting = metadata.get('reconvert') == "true"
@@ -573,7 +582,7 @@ def versionExists(file, localSuffix, suffix):
             elif os.path.isfile(filename) and os.stat(filename).st_ctime >= 10:
                 return True
         except:
-            traceback.print_exc()
+            log(traceback.format_exc(),'red')
     return False
 
 def jobQueued(file, suffix):
@@ -686,7 +695,6 @@ class videoConvert(threading.Thread):
 
             # Loop through all the files in the job (e.g. raw1, raw2,)
             for key in self.job['files']:
-
                 info = self.videoInfo(element['files'][key])
                 if not info: # Could not fetch video info. Perhaps corrupt file?
                     error = True
@@ -756,7 +764,6 @@ class videoConvert(threading.Thread):
     
     def generateLTOverlay(self, title, subtitle, file):
         """Generate lower third overlay png file"""
-        import Image, ImageDraw, ImageFont
         width, height = 875, 115
 
         font = os.path.join(settings.get('fontDir'), "NeoSansStd-Regular.otf")
@@ -771,7 +778,6 @@ class videoConvert(threading.Thread):
 
     def generateIntroOverlay(self, title, course, date, file, color, language):
         """Generate intro overlay"""
-        import Image, ImageDraw, ImageFont
 
         width, height = 1280, 720
         titleOffsetX = 340
@@ -819,13 +825,12 @@ class videoConvert(threading.Thread):
         for key,part in enumerate(titleSegments):
             strings.append([(titleOffsetX, 430 + 45*key), part.upper(), color, 40, titleFont])
         strings.append([(titleOffsetX, 400), course.upper(), color, 24, regularFont])
-        strings.append([(-20,-1), date, (204,204,204,255), 24, regularFont])
+        strings.append([(-20,-10), date, (204,204,204,255), 24, regularFont])
 
         self.drawText((width,height), strings).save(file)
 
     def generateOutroOverlays(self, producer, technician, lecturer, year, nodtubranding, file, language, license):
         """Generate the two outro overlays"""
-        import Image, ImageDraw, ImageFont
 
         width, height = 1280, 720
         titleOffsetX = 340
@@ -881,18 +886,18 @@ class videoConvert(threading.Thread):
             text = str(text)
 
             draw = ImageDraw.Draw(imtext)
-            font = ImageDraw.Font((255,255,255), font, size=size)
+            fontObj = ImageFont.truetype(font, size=size)
             
             (offset_x, offset_y) = pos
             
             if offset_x < 0:
-                offset_x = imsize[0] - draw.textsize(text, font)[0] + pos[0]
+                offset_x = imsize[0] - draw.textsize(text, fontObj)[0] + pos[0]
             if offset_y < 0:
                 pass
-                offset_y = imsize[1] - draw.textsize(text, font)[1] + pos[1]
+                offset_y = imsize[1] - draw.textsize(text, fontObj)[1] + pos[1]
 
-            draw.text((offset_x, offset_y), text, font)
-            draw.flush()
+            draw.text((offset_x, offset_y), text, font=fontObj, fill=255)
+            #draw.flush()
 
             alpha = ImageChops.lighter(alpha, imtext)
             solidcolor = Image.new("RGBA", imsize, color)
@@ -913,26 +918,25 @@ class videoConvert(threading.Thread):
         else:
             process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=None)
         #stdout, stderr = process.communicate()
-        stdout = ''
+        stdout = b''
         while True:
             output = process.stdout.read(1)
-            if output == '' and process.poll() != None:
+            if output == b'' and process.poll() != None:
                 break
-            if output != '':
+            if output != b'':
                 if len(sys.argv) > 1 and sys.argv[1] == '-v':
                     sys.stdout.write(output)
                 sys.stdout.flush()
                 stdout += output
         if process.returncode > 0:
             raise executeException({"returncode": process.returncode, "cmd": cmd})
-        return stdout
+        return stdout.decode('utf-8')
 
     # Routine to get basic information about a video file
     @staticmethod
     def videoInfo(file):
         try:
             infoDict = videoConvert.executeCommand("ffprobe \""+file+"\" -print_format json -show_format -show_streams 2>/dev/null")
-
             info = json.loads(infoDict)
 
             videoStreams = 0
@@ -992,7 +996,7 @@ class videoConvert(threading.Thread):
         """Write the avisynth script for the conversion job"""
         path = self.winPath(options['path'][0])
 
-        metadata = getMetadata(options['path'][0], str=True)
+        metadata = getMetadata(options['path'][0])
         if metadata == False:
             raise metadataException("No metadata file found!!")
 
@@ -1165,7 +1169,7 @@ class videoConvert(threading.Thread):
         if title and course_id and pubdate:
             self.generateIntroOverlay(title, course_id, pubdate, settings.get('scriptDir')+"Konverterede/" + options['path'][1] + '-introOverlay.png', titleColor, language)
             self.generateOutroOverlays(producer, technician , lecturer, year, nodtubranding, settings.get('scriptDir')+"Konverterede/" + options['path'][1] + '-outroOverlay', language, license)
-            template = open(settings.get('scriptDir') + "video-convert/avisynth.avs", 'r').read().decode('utf-8')
+            template = open(settings.get('scriptDir') + "video-convert/avisynth.avs", 'r').read()
             videoList = ""
             for i in range(len(options['files'])):
 
@@ -1207,7 +1211,7 @@ class videoConvert(threading.Thread):
                 removeSection=removeSectionCmd,
                 nametag=settings.get('nametagPath')
                 )
-            script = open(settings.get('scriptDir')+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.avs', 'w')
+            script = open(settings.get('scriptDir')+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.avs', 'wb')
             script.write(template.encode('latin-1', 'ignore'))
             script.close
             return template
@@ -1266,7 +1270,7 @@ class videoConvert(threading.Thread):
     def writeFFmetadata(self,options):
         """Write an ffmeta file with chapter information. This info is incorporated into the converted videos"""
         path = self.winPath(options['path'][0])
-        metadata = getMetadata(options['path'][0], str=True)
+        metadata = getMetadata(options['path'][0])
 
         totalDuration = options['duration']
 
@@ -1299,7 +1303,7 @@ class videoConvert(threading.Thread):
                 ffmeta += "END=" + str(nextseconds * 1000) + "\n" 
                 ffmeta += "title=" + value[1] + "\n"
 
-            script = open(settings.get('scriptDir')+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.ffmeta', 'w')
+            script = open(settings.get('scriptDir')+"Konverterede/" + options['path'][1] + "-"+ options['options']['suffix'] + '.ffmeta', 'wb')
             script.write(ffmeta.encode('utf-8'))
             script.close
             return True
@@ -1384,157 +1388,227 @@ class videoConvert(threading.Thread):
 ########### YOUTUBEUPLOAD ################
 ##########################################
 
-# class youtubeUpload (threading.Thread):
-#     """Handles youtube uploads"""
-#     queue = deque()
-#     def run(self):
-#         while not mainThreadDone or self.queue.__len__() > 0:
-#             if self.queue.__len__() > 0:
-#                 element = self.queue.popleft()
-#                 metadata = getMetadata(element['filename'])
-#                 log("Attempting YouTube upload of '%s'" % element['filename'], 'green')
-#                 if metadata.get("enotelms:YouTubeUID"):
-#                     log("Video is already on YouTube: " + element['filename'], 'yellow')
-#                     continue
-#                 else:
-#                     try:
-#                         self.yt_service = self.authenticate(element['username'],element['password'],element['developerKey'])
-#                     except gdata.service.BadAuthentication:
-#                         log("ERROR: Wrong credentials for YouTube account '%s'" % element['username'], "red")
-#                     except gdata.service.Error as e:
-#                         traceback.print_exc()
-#                         log("ERROR: (Possibly?) no video channel created on YouTube account: " + element['username'], "red")
-#                     else:
-#                         video_id = self.uploadFromMetaData(element, metadata)
-#                         if video_id != False:
-#                             writeMetadata(element['filename'],{"enotelms:YouTubeUID": video_id})
-#                         else:
-#                             log("Youtube upload failed!", 'red')
-#             time.sleep(0.5)
-#         log("Main thread exited, terminating youtubeUpload...")
+class youtubeUpload (threading.Thread):
+    """Handles youtube uploads"""
+    queue = deque()
+    def run(self):
+        while not mainThreadDone or self.queue.__len__() > 0:
+            if self.queue.__len__() > 0:
+                element = self.queue.popleft()
+                metadata = getMetadata(element['filename'])
+                log("Attempting YouTube upload of '%s'" % element['filename'], 'green')
+                if metadata.get("enotelms:YouTubeUID"):
+                    log("Video is already on YouTube: " + element['filename'], 'yellow')
+                    continue
+                else:
+                    try:
+                        credentials = self.getCredentials(element['alias'])
+                        if not credentials:
+                            log("ERROR: No YouTube credentials found for '{}'".format(element['alias']), 'red')
+                            continue
+                        self.youtube = self.authenticate(element['alias'])
+                    except:
+                        log(traceback.format_exc(),'red')
+                    else:
+                        video_id = self.uploadFromMetaData(element, metadata)
+                        if video_id != False:
+                            writeMetadata(element['filename'],{"enotelms:YouTubeUID": video_id})
+                        else:
+                            log("Youtube upload failed!", 'red')
+            time.sleep(0.5)
+        log("Main thread exited, terminating youtubeUpload...")
 
-#     # Upload video processing metadata
-#     def uploadFromMetaData(self, preferences, metadata):
-#         log('Uploading "' + preferences['filename'] + '"')
-#         playlist = preferences.get('playlist')
-#         if preferences.get('private') == True:
-#             private = True
-#         else:
-#             private = False
-#         missing = validateList(metadata, ["title", "description"])
-#         if missing.__len__() > 0:
-#             log("Missing options: " + ", ".join(missing) + " for file " + preferences['filename'], 'red')
-#             return False
-#         if not metadata.get('itunes:keywords'):
-#             metadata['itunes:keywords'] = settings.get('defaultYoutubeKeywords')
-#             log("WARNING: No keywords specified for file: " + preferences['filename'] + "!", 'yellow')
+    def getCredentials(self, username):
+        users = json.loads(open(settings.get('youtubeAuth'), 'r').read())
+        userData = users.get(username)
+        if userData and userData.get('credentials'):
+            return GoogleCredentials.from_json(userData.get('credentials'))
 
-#         key = ""
-#         for i in metadata['itunes:keywords'].split(" "):
-#             if len(i) >= 2:
-#                 key += i + ", "
+        return False
 
-#         metadata['description'] = metadata['description'].replace("<", "←")
-#         metadata['description'] = metadata['description'].replace(">", "→")
+    # Upload video processing metadata
+    def uploadFromMetaData(self, preferences, metadata):
+        log('Uploading "' + preferences['filename'] + '"')
+        playlist = preferences.get('playlist')
+        if preferences.get('private') == True:
+            private = True
+        else:
+            private = False
+        missing = validateList(metadata, ["title", "description"])
+        if missing.__len__() > 0:
+            log("Missing options: " + ", ".join(missing) + " for file " + preferences['filename'], 'red')
+            return False
+        if not metadata.get('itunes:keywords'):
+            metadata['itunes:keywords'] = settings.get('defaultYoutubeKeywords')
+            log("WARNING: No keywords specified for file: " + preferences['filename'] + "!", 'yellow')
+
+        key = ""
+        for i in metadata['itunes:keywords'].split(" "):
+            if len(i) >= 2:
+                key += i + ", "
+
+        metadata['description'] = metadata['description'].replace("<", "←")
+        metadata['description'] = metadata['description'].replace(">", "→")
 
 
         
-#         options = {
-#             "title": metadata['title'][:100],
-#             "description": metadata['description'],
-#             "keywords": key[:-2],
-#             "private": private,
-#             "path": preferences['filename'],
-#             "category": preferences.get('category')
-#         }
+        options = {
+            "title": metadata['title'][:100],
+            "description": metadata['description'],
+            "keywords": key[:-2],
+            "private": private,
+            "path": preferences['filename'],
+            "category": preferences.get('category')
+        }
 
-#         try:
-#             video_id = self.uploadVideo(options)
-#         except gdata.youtube.service.YouTubeError:
-#             return False
-#         else:
-#             if playlist:
-#                 try:
-#                     self.addToPlaylist(video_id, playlist)
-#                 except gdata.service.RequestError:
-#                     traceback.print_exc()
-#                     log("Some error occured adding the video to youtube playlist..", 'red')
-#                     #return False
-#             return video_id
+        try:
+            video_id = self.uploadVideo(options)
+        except:
+            log(traceback.format_exc(), 'red')
+            return False
+        else:
+            if playlist:
+                try:
+                    self.addToPlaylist(video_id, playlist)
+                except:
+                    log(traceback.format_exc(),'red')
+                    log("Some error occured adding the video to youtube playlist..", 'red')
+                    #return False
+            return video_id
 
-#     @staticmethod
-#     def addToQueue(filename, options):
-#         options['filename'] = filename
-#         youtubeUpload.queue.append(options)
+    @staticmethod
+    def addToQueue(filename, options):
+        options['filename'] = filename
+        youtubeUpload.queue.append(options)
 
-#     def authenticate(self, username, password, developer_key):
-#         yt_service = gdata.youtube.service.YouTubeService()
-#         yt_service.ssl = True
-#         yt_service.developer_key = developer_key
-#         yt_service.client_id = 'Podcast uploader'
-#         yt_service.email = username
-#         yt_service.password = password
-#         yt_service.ProgrammaticLogin()
+    def authenticate(self, username):
+        YOUTUBE_SCOPE = "https://www.googleapis.com/auth/youtube"
 
-#         return yt_service
+        credentials = self.getCredentials(username)
+        if not credentials:
+            return False
 
-#     def retrievePlaylists(self):
-#         playlist_feed = self.yt_service.GetYouTubePlaylistFeed(username='default')
-#         playlists = {}
-#         for item in playlist_feed.entry:
-#             playlists[item.title.text] = item.feed_link[0].href
-#         return playlists
+        flow = flow_from_clientsecrets(settings.get("youtubeSecrets"), scope=YOUTUBE_SCOPE)
+        return build("youtube", "v3", http=credentials.authorize(httplib2.Http()))
+
+    def retrievePlaylists(self):
+        playlists = {}
+        try:
+            response = self.youtube.playlists().list(part='snippet', mine=True).execute()
+        except:
+            log(traceback.format_exc(),'red')
+        else:
+            for item in response.get('items'):
+                title = item.get('snippet').get('localized').get('title')
+                playlists['title'] = item.get('id')
+
+        return playlists
     
-#     def addPlaylist(self, playlist):
-#         new_playlist = self.yt_service.AddPlaylist(playlist,'')
-#         if isinstance(new_playlist, gdata.youtube.YouTubePlaylistEntry):
-#             log('Added playlist "' + playlist + '"', 'green')
-#             return new_playlist
-   
-#     def addToPlaylist(self, video_id, playlist):
-#         playlists = self.retrievePlaylists()
-#         if playlist in playlists:
-#             url = playlists[playlist]
-#         else:
-#             new_playlist = self.addPlaylist(playlist)
-#             url = new_playlist.feed_link[0].href
+    def addPlaylist(self, playlist):
+        try:
+            res = self.youtube.playlists().insert(
+              part="snippet,status",
+              body=dict(
+                snippet=dict(
+                  title=playlist
+                ),
+                status=dict(
+                    privacyStatus='public'
+                )
+              )
+            ).execute()
+        except:
+            log(traceback.format_exc(),'red')
+            return False
+        else:
+            return res['id']
 
-#         entry = self.yt_service.AddPlaylistVideoEntryToPlaylist(url, video_id)
-#         if isinstance(entry, gdata.youtube.YouTubePlaylistVideoEntry):
-#             log("Video added to playlist '" + playlist + "'", 'green')
-#         else:
-#             log("Video NOT added to playlist", 'red')
-#         pass
-#     def uploadVideo(self, options):
-#         if options['private'] == True:
-#             private = gdata.media.Private()
-#         else:
-#             private = None
-#         if options.get('category'):
-#             category = options.get('category')
-#         else:
-#             category = settings.get('defaultYoutubeCategory')
-#         media_group = gdata.media.Group(
-#             title = gdata.media.Title(text=options['title']),
-#             description = gdata.media.Description(description_type='plain', text=options['description']),
-#             keywords = gdata.media.Keywords(text=options['keywords']),
-#             category = [gdata.media.Category(
-#                 text=category,
-#                 scheme='http://gdata.youtube.com/schemas/2007/categories.cat',
-#                 label=category
-#                 )],
-#             player = None,
-#             private = private
-#             )
-#         video_entry = gdata.youtube.YouTubeVideoEntry(media=media_group)
-#         video_file_location = options['path']
-#         try:
-#             new_entry = self.yt_service.InsertVideoEntry(video_entry, video_file_location)
-#         except gdata.youtube.service.YouTubeError as e:
-#             log(e.message)
-#             raise
-#         else:
-#             return new_entry.id.text.split('/')[-1]
+    def uploadVideo(self, options):
+
+        # Retriable exceptions and status codes from youtube example code
+
+        # Always retry when these exceptions are raised.
+        RETRIABLE_EXCEPTIONS = (httplib2.HttpLib2Error, IOError, http.client.NotConnected,
+  http.client.IncompleteRead, http.client.ImproperConnectionState,
+  http.client.CannotSendRequest, http.client.CannotSendHeader,
+  http.client.ResponseNotReady, http.client.BadStatusLine)
+
+        # Always retry when an apiclient.errors.HttpError with one of these status
+        # codes is raised.
+        RETRIABLE_STATUS_CODES = [500, 502, 503, 504]
+
+        body = dict(
+            snippet = dict(
+                title = options['title'],
+                description = options['description'],
+                tags = None,
+                categoryId = 22
+            ),
+            status = dict(
+                privacyStatus = 'private' if options['private'] else 'public'
+            )
+        )
+
+        part = ",".join(body.keys())
+
+        try:
+            request = self.youtube.videos().insert(part=part, body=body, media_body=MediaFileUpload(options['path'], chunksize=1024*1024*100, resumable=True))
+            response = None
+            retries = 0
+            while response is None:
+                try:
+                    status, response = request.next_chunk()
+                    if response is not None:
+                        if 'id' in response:
+                            print(response)
+                            return response['id']
+                        else:
+                            return False
+                except HttpError as e:
+                    if e.resp.status in RETRIABLE_STATUS_CODES:
+                        log("Got HTTP Error %d: %s" % (e.resp.status, e.content), 'yellow')
+                        retries += 1
+                    else:
+                        raise
+                except RETRIABLE_EXCEPTIONS as e:
+                    log("Retriable exception %s" % e, 'yellow')
+                    retries += 1
+
+                if retries > 10:
+                    log("ERROR: Retried 10 times uploading {}, bailing".format(options['file']), 'red')
+                    return False
+        except:
+            log(traceback.format_exc(),'red')
+            return False
+
+    def addToPlaylist(self, video_id, playlist):
+        playlists = self.retrievePlaylists()
+        if playlist in playlists:
+            playlist_id = playlists[playlist]
+        else:
+            playlist_id = self.addPlaylist(playlist)
+    
+        if video_id and playlist_id:
+            print("Playlist id: {} Video ID: {}".format(playlist_id, video_id))
+            try:
+                res = self.youtube.playlistItems().insert(
+                    part='snippet', 
+                    body=dict(
+                        snippet=dict(
+                            resourceId=dict(
+                                kind='youtube#video',
+                                videoId=video_id),
+                            playlistId=playlist_id,
+                        )
+                    )
+                ).execute()
+            except Exception as e:
+                log(traceback.format_exc(),'red')
+                print(e.content)
+                log("Video NOT added to playlist", 'red')
+            else:
+                log("Video added to playlist '" + playlist + "'", 'green')
+
 
 ##########################################
 ########### Main thread ##################
@@ -1555,8 +1629,8 @@ filesAddedYoutube = []
 
 checkFiles()
 
-#youtube = youtubeUpload()
-#youtube.start()
+youtube = youtubeUpload()
+youtube.start()
 
 lastCount = 0
 
