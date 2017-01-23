@@ -1493,14 +1493,25 @@ class youtubeUpload (threading.Thread):
 
     def retrievePlaylists(self):
         playlists = {}
-        try:
-            response = self.youtube.playlists().list(part='snippet', mine=True).execute()
-        except:
-            log(traceback.format_exc(),'red')
-        else:
-            for item in response.get('items'):
-                title = item.get('snippet').get('localized').get('title')
-                playlists['title'] = item.get('id')
+        pageToken = None
+        response = None
+
+        while True:
+            fetchedAll = True
+            try:
+                response = self.youtube.playlists().list(part='snippet', maxResults=50, pageToken=pageToken, mine=True).execute()
+                pageToken = response.get('nextPageToken')
+                if pageToken:
+                    fetchedAll = False
+                if len(playlists) == response['pageInfo']['totalResults']:
+                    break
+            except:
+                log(traceback.format_exc(),'red')
+                break
+            else:
+                for item in response.get('items'):
+                    title = item.get('snippet').get('localized').get('title')
+                    playlists[title] = item.get('id')
 
         return playlists
     
@@ -1542,7 +1553,7 @@ class youtubeUpload (threading.Thread):
                 title = options['title'],
                 description = options['description'],
                 tags = None,
-                categoryId = 22
+                categoryId = 27 # Education, hardcoded for now
             ),
             status = dict(
                 privacyStatus = 'private' if options['private'] else 'public'
@@ -1560,7 +1571,6 @@ class youtubeUpload (threading.Thread):
                     status, response = request.next_chunk()
                     if response is not None:
                         if 'id' in response:
-                            print(response)
                             return response['id']
                         else:
                             return False
@@ -1589,7 +1599,6 @@ class youtubeUpload (threading.Thread):
             playlist_id = self.addPlaylist(playlist)
     
         if video_id and playlist_id:
-            print("Playlist id: {} Video ID: {}".format(playlist_id, video_id))
             try:
                 res = self.youtube.playlistItems().insert(
                     part='snippet', 
