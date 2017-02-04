@@ -1083,7 +1083,7 @@ class videoConvert(threading.Thread):
             lowerThirdsData = metadata.get('lowerThirds')
             if lowerThirdsData:
                 if len(lowerThirdsData)%3 == 0:
-                    for n in range(len(lowerThirdsData)/3):
+                    for n in range(int(len(lowerThirdsData)/3)):
                         image = settings.get('scriptDir')+"Konverterede/" + options['path'][1] + '-lowerThird-'+str(n)+'.png';
                         self.generateLTOverlay(lowerThirdsData[(n-1)*3+1].replace(chr(9634),','), lowerThirdsData[(n-1)*3+2].replace(chr(9634),','), image)
                         newTime = self.getCorrectedTime(float(lowerThirdsData[(n-1)*3]), newRemoveSections)
@@ -1156,15 +1156,14 @@ class videoConvert(threading.Thread):
         
         logo = metadata.get('logo')
 
+        logoOverlay = settings.get('defaultLogo')
+
         if logo:
             if logo == "false":
-                logoOverlay = ""
                 enableLogo = False
             elif os.path.isfile(dirname + "logo" + logo + ".png"):
                 logoOverlay = self.winPath(dirname + "logo" + logo + ".png")
-        else:
-            logoOverlay = settings.get('defaultLogo')
-
+                
         # If everything is allright, continue
         if title and course_id and pubdate:
             self.generateIntroOverlay(title, course_id, pubdate, settings.get('scriptDir')+"Konverterede/" + options['path'][1] + '-introOverlay.png', titleColor, language)
